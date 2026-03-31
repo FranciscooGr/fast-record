@@ -1,0 +1,177 @@
+# ============================================================
+#  fast-record — Configuración Principal de Antigravity
+# ============================================================
+# Este archivo define los agentes, sus dominios, skills
+# y los workflows de comunicación entre ellos.
+
+project:
+  name: fast-record
+  description: >
+    App de registro de gastos e ingresos vía WhatsApp.
+    Frontend Angular (PWA) + Backend FastAPI + PostgreSQL.
+    Categorización automática con Gemini/Groq.
+
+# ============================================================
+#  AGENTES
+# ============================================================
+agents:
+
+  # ----------------------------------------------------------
+  #  AGENTE 1: Frontend Expert
+  # ----------------------------------------------------------
+  - name: frontend-agent
+    description: >
+      Arquitecto Senior de Angular. Experto en PWA, Mobile First
+      y visualización de datos con Chart.js. Trabaja exclusivamente
+      en ./frontend. Comunica con el backend solo a través de DTOs TypeScript.
+    rules: .agents/rules/frontend-agent.md
+    path_restriction: ./frontend
+    skills:
+      - .agent/skills/angular-architecture
+      - .agent/skills/angular-pwa-mobile-first
+      - .agent/skills/angular-chartjs
+      - .agent/skills/angular-api-http
+      - .agent/skills/angular-testing
+    model: gemini-2.5-pro
+    tools:
+      - read_file
+      - write_file
+      - run_terminal_command
+
+  # ----------------------------------------------------------
+  #  AGENTE 2: Backend Master
+  # ----------------------------------------------------------
+  - name: backend-agent
+    description: >
+      Ingeniero Senior de Backend especializado en FastAPI y PostgreSQL.
+      Gestiona webhooks de WhatsApp, orquestación de LLMs (Gemini/Groq)
+      con fallback, y API REST para el dashboard. Trabaja exclusivamente
+      en ./backend. El saldo NUNCA es una columna persistida.
+    rules: .agents/rules/backend-agent.md
+    path_restriction: ./backend
+    skills:
+      - .agent/skills/fastapi-templates
+      - .agent/skills/security-best-practices
+      - .agent/skills/database-schema-design
+      - .agent/skills/backend-testing
+      - .agent/skills/systematic-debugging
+      - .agent/skills/test-driven-development
+    model: gemini-2.5-pro
+    tools:
+      - read_file
+      - write_file
+      - run_terminal_command
+
+# ============================================================
+#  WORKFLOWS — Cómo se comunican los agentes
+# ============================================================
+workflows:
+
+  # ----------------------------------------------------------
+  #  WORKFLOW 1: Nuevo endpoint completo (back → front)
+  #  Uso: "Crear el endpoint de dashboard con su componente Angular"
+  # ----------------------------------------------------------
+  - name: new-feature-pipeline
+    description: >
+      Crea una feature completa de extremo a extremo.
+      El backend define el contrato DTO primero, luego
+      el frontend lo implementa. Usar cuando se necesita
+      un nuevo endpoint con su UI correspondiente.
+    steps:
+      - agent: backend-agent
+        task: >
+          Define y crea el endpoint para: $FEATURE_DESCRIPTION.
+          Entregá: 1) Schema Pydantic, 2) Router FastAPI,
+          3) Servicio con lógica de negocio,
+          4) DTO TypeScript equivalente para el frontend.
+        output: backend_contract
+
+      - agent: frontend-agent
+        task: >
+          Implementá la UI para: $FEATURE_DESCRIPTION.
+          Usá este contrato del backend: $backend_contract.
+          Entregá: 1) DTO en core/models/, 2) Service en core/services/,
+          3) Componente standalone con signals, 4) Tests Jest básicos.
+        input: $backend_contract
+
+  # ----------------------------------------------------------
+  #  WORKFLOW 2: Solo backend
+  #  Uso: "Agregar endpoint de resumen mensual"
+  # ----------------------------------------------------------
+  - name: backend-only
+    description: >
+      Tareas exclusivas del backend sin impacto en el frontend.
+      Usar para: migraciones de DB, nuevos servicios internos,
+      lógica de webhook, configuración de LLMs.
+    steps:
+      - agent: backend-agent
+        task: $TASK_DESCRIPTION
+
+  # ----------------------------------------------------------
+  #  WORKFLOW 3: Solo frontend
+  #  Uso: "Mejorar el gráfico de categorías en el dashboard"
+  # ----------------------------------------------------------
+  - name: frontend-only
+    description: >
+      Tareas exclusivas del frontend sin impacto en el backend.
+      Usar para: componentes visuales, estilos, PWA, Chart.js,
+      ajustes de responsividad o accesibilidad.
+    steps:
+      - agent: frontend-agent
+        task: $TASK_DESCRIPTION
+
+  # ----------------------------------------------------------
+  #  WORKFLOW 4: Análisis paralelo (revisión de código)
+  #  Uso: "Revisá seguridad y performance de la app"
+  # ----------------------------------------------------------
+  - name: parallel-review
+    description: >
+      Ambos agentes revisan su dominio en paralelo.
+      Usar para: auditorías, refactors grandes, PRs importantes.
+    parallel:
+      - agent: backend-agent
+        task: >
+          Revisá ./backend en busca de:
+          1) Vulnerabilidades de seguridad (JWT, HMAC, inputs)
+          2) Queries sin índices o que calculen saldo con columna
+          3) Endpoints sin validación Pydantic
+          4) Secretos hardcodeados
+        output: backend_review
+
+      - agent: frontend-agent
+        task: >
+          Revisá ./frontend en busca de:
+          1) Componentes con lógica de negocio
+          2) DTOs que no coincidan con el contrato del backend
+          3) Llamadas HTTP fuera de services
+          4) Estilos no Mobile First
+          5) Memory leaks en Chart.js (ngOnDestroy)
+        output: frontend_review
+
+    aggregate:
+      task: >
+        Consolidá los reportes de ambos agentes en una lista
+        priorizada de issues con su agente responsable y severidad.
+      input: $backend_review, $frontend_review
+
+  # ----------------------------------------------------------
+  #  WORKFLOW 5: Actualización de contrato DTO
+  #  Uso: "El backend cambió el campo X del endpoint de dashboard"
+  # ----------------------------------------------------------
+  - name: update-dto-contract
+    description: >
+      Sincroniza un cambio de contrato DTO entre backend y frontend.
+      Usar cuando cambia la estructura de respuesta de un endpoint.
+    steps:
+      - agent: backend-agent
+        task: >
+          Actualizá el schema Pydantic y el endpoint para: $CHANGE_DESCRIPTION.
+          Generá el nuevo DTO TypeScript equivalente para el frontend.
+        output: new_contract
+
+      - agent: frontend-agent
+        task: >
+          Actualizá el DTO en core/models/ y el service correspondiente
+          con este nuevo contrato: $new_contract.
+          Verificá que ningún componente rompa con el cambio.
+        input: $new_contract
