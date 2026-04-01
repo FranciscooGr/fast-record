@@ -1,0 +1,129 @@
+"""
+Movement service — create movements and calculate balance.
+
+The balance (saldo) is NEVER stored — it is ALWAYS computed dynamically
+by aggregating movements via SUM.  This is an inviolable business rule.
+"""
+
+import logging
+from decimal import Decimal
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.movement import Movement, TipoMovimiento
+
+logger = logging.getLogger(__name__)
+
+
+async def crear_movimiento(
+    usuario_id: int,
+    tipo: str,
+    monto: float,
+    categoria: str,
+    nota: str,
+    db: AsyncSession,
+) -> Movement:
+    """
+    Insert a new movement record and return the created ORM instance.
+
+    Parameters
+    ----------
+    usuario_id : int
+        FK to the users table.
+    tipo : str
+        "INGRESO" or "EGRESO".
+    monto : float
+        Positive amount.
+    categoria : str
+        Category label.
+    nota : str
+        Short descriptive note.
+    db : AsyncSession
+        The async SQLAlchemy session.
+
+    Returns
+    -------
+    Movement
+        The persisted Movement instance with its generated id.
+    """
+    movement = Movement(
+        usuario_id=usuario_id,
+        tipo=TipoMovimiento(tipo),
+        monto=Decimal(str(monto)),
+        categoria=categoria,
+        nota=nota,
+    )
+    db.add(movement)
+    await db.commit()
+    await db.refresh(movement)
+
+    logger.info(
+        "Movement created: id=%d user=%d tipo=%s monto=%s cat=%s",
+        movement.id,
+        usuario_id,
+        tipo,
+        monto,
+        categoria,
+    )
+    return movement
+
+
+async def calcular_saldo(usuario_id: int, db: AsyncSession) -> dict:
+    """
+    Compute the running balance from the movements table.
+
+    The balance is NEVER read from a column — it is calculated:
+        saldo = SUM(INGRESO) - SUM(EGRESO)
+
+    Parameters
+    ----------
+    usuario_id : int
+        The user whose balance to compute.
+    db : AsyncSession
+        The async SQLAlchemy session.
+
+    Returns
+    -------
+    dict
+        {
+            "ingresos_total": float,
+            "egresos_total": float,
+            "saldo": float  # ingresos - egresos
+        }
+    """
+    # SUM of INGRESO
+    stmt_ingresos = select(
+        func.coalesce(func.sum(Movement.monto), 0)
+    ).where(
+        Movement.usuario_id == usuario_id,
+        Movement.tipo == TipoMovimiento.INGRESO,
+    )
+    result_ing = await db.execute(stmt_ingresos)
+    ingresos_total = float(result_ing.scalar_one())
+
+    # SUM of EGRESO
+    stmt_egresos = select(
+        func.coalesce(func.sum(Movement.monto), 0)
+    ).where(
+        Movement.usuario_id == usuario_id,
+        Movement.tipo == TipoMovimiento.EGRESO,
+    )
+    result_egr = await db.execute(stmt_egresos)
+    egresos_total = float(result_egr.scalar_one())
+
+    saldo = ingresos_total - egresos_total
+
+    logger.info(
+        "Balance for user=%d: ingresos=%.2f egresos=%.2f saldo=%.2f",
+        usuario_id,
+        ingresos_total,
+        egresos_total,
+        saldo,
+    )
+
+    return {
+        "ingresos_total": ingresos_total,
+        "egresos_total": egresos_total,
+        "saldo": saldo,
+    }
