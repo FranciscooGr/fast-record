@@ -1,9 +1,12 @@
 """
-LLM Service — Groq financial data extraction.
+LLM Service — Groq financial data extraction (async).
 
 Sends the user's text message along with a strict system prompt to
-Groq (Llama 3) and returns a validated JSON with:
+Groq (via AsyncGroq) and returns a validated JSON with:
   { tipo, monto, categoria, nota }
+
+Fallback: if the LLM fails or returns unparseable data, the function
+returns a safe default with categoria="Otros".
 
 SDK required:  groq
 Install with:  pip install groq
@@ -12,7 +15,7 @@ Install with:  pip install groq
 import json
 import logging
 
-from groq import Groq
+from groq import AsyncGroq
 
 from app.core.config import settings
 
@@ -66,12 +69,22 @@ Respondé SOLO el JSON. Nada más.
 """
 
 # ── Groq model — ultra-fast, free tier ──────────────────────────
-_MODEL_NAME = "openai/gpt-oss-120b"
+_MODEL_NAME = "llama-3.3-70b-versatile"
+
+# ── Fallback default when LLM completely fails ─────────────────
+_FALLBACK_DEFAULT = {
+    "tipo": "EGRESO",
+    "monto": 0,
+    "categoria": "Otros",
+    "nota": "No se pudo procesar el mensaje",
+    "proveedor_usado": "fallback_otros",
+    "confianza": 0.0,
+}
 
 
-def _get_client() -> Groq:
-    """Create a Groq client configured with the API key from settings."""
-    return Groq(api_key=settings.GROQ_API_KEY)
+def _get_client() -> AsyncGroq:
+    """Create an async Groq client configured with the API key from settings."""
+    return AsyncGroq(api_key=settings.GROQ_API_KEY)
 
 
 async def extract_financial_data(text: str) -> dict:
@@ -86,47 +99,47 @@ async def extract_financial_data(text: str) -> dict:
     Returns
     -------
     dict
-        A dict with keys: tipo, monto, categoria, nota.
-
-    Raises
-    ------
-    ValueError
-        If Groq's response cannot be parsed as valid JSON.
-    Exception
-        Propagated from the Groq SDK on network / API errors.
+        A dict with keys: tipo, monto, categoria, nota, proveedor_usado, confianza.
+        On complete failure, returns a safe fallback with categoria="Otros".
     """
     client = _get_client()
 
     logger.info("Sending message to Groq (%s): %s", _MODEL_NAME, text[:80])
 
-    response = client.chat.completions.create(
-        model=_MODEL_NAME,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text},
-        ],
-        temperature=0,
-        response_format={"type": "json_object"},
-    )
-
-    raw_text = response.choices[0].message.content.strip()
-
-    logger.info("Groq raw response: %s", raw_text[:200])
-
     try:
+        response = await client.chat.completions.create(
+            model=_MODEL_NAME,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+
+        raw_text = response.choices[0].message.content.strip()
+        logger.info("Groq raw response: %s", raw_text[:200])
+
         parsed = json.loads(raw_text)
+
     except json.JSONDecodeError as exc:
-        logger.error("Groq returned invalid JSON: %s", raw_text[:300])
-        raise ValueError(
-            f"Groq no devolvió un JSON válido: {raw_text[:200]}"
-        ) from exc
+        logger.error("Groq returned invalid JSON: %s", str(exc))
+        return {**_FALLBACK_DEFAULT, "raw_response": str(exc)}
+
+    except Exception as exc:
+        logger.error("Groq API call failed: %s", str(exc))
+        return {**_FALLBACK_DEFAULT, "raw_response": str(exc)}
 
     # Validate required keys
     required_keys = {"tipo", "monto", "categoria", "nota"}
     missing = required_keys - set(parsed.keys())
     if missing:
-        raise ValueError(
-            f"Groq JSON incompleto — faltan claves: {missing}"
-        )
+        logger.error("Groq JSON missing keys: %s", missing)
+        return {**_FALLBACK_DEFAULT, "raw_response": raw_text}
+
+    # Enrich with orchestration metadata
+    parsed["proveedor_usado"] = "groq"
+    parsed["confianza"] = 1.0
+    parsed.setdefault("raw_response", raw_text)
 
     return parsed

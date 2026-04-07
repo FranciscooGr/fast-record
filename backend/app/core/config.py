@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # ── WhatsApp ────────────────────────────────────────────────
     WHATSAPP_VERIFY_TOKEN: str = ""
     WHATSAPP_API_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
 
     # ── LLM Providers ───────────────────────────────────────────
     GEMINI_API_KEY: str = ""
