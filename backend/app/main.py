@@ -5,7 +5,7 @@ Lifespan manages startup/shutdown:
 - Startup: initialise logging
 - Shutdown: dispose the async engine connection pool
 """
-
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +14,7 @@ from app.api.v1.router import api_router
 from app.core.logging import setup_logging
 from app.db.session import engine
 
+logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

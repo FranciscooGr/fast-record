@@ -16,7 +16,7 @@ import logging
 
 from app.core.security import create_access_token
 from app.db.session import AsyncSessionLocal
-from app.services.llm_service import extract_financial_data
+from app.services.hybrid_nlp_service import analyze_hybrid_message
 from app.services.movimiento_service import calcular_saldo, crear_movimiento
 from app.services.usuario_service import get_or_create_usuario
 from app.services.whatsapp_service import send_whatsapp_message
@@ -46,10 +46,10 @@ async def process_incoming_message(phone: str, text: str) -> None:
             user = await get_or_create_usuario(phone, db)
             logger.info("User resolved: id=%d phone=%s", user.id, phone)
 
-            # ── 2. Extract financial data via LLM ──────────────────
-            llm_result = await extract_financial_data(text)
+            # ── 2. Extract financial data (Regex → LLM fallback) ──
+            llm_result = await analyze_hybrid_message(text)
             logger.info(
-                "LLM result: tipo=%s monto=%s cat=%s provider=%s",
+                "NLP result: tipo=%s monto=%s cat=%s provider=%s",
                 llm_result.get("tipo"),
                 llm_result.get("monto"),
                 llm_result.get("categoria"),
