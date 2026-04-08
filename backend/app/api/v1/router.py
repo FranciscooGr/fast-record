@@ -20,6 +20,6 @@ api_router.include_router(usuarios_router)
 api_router.include_router(webhook_router)
 
 # ── Register domain routers here as the project grows ───────
-# from app.api.v1.endpoints.dashboard import router as dashboard_router
-# api_router.include_router(dashboard_router)
+from app.api.v1.endpoints.dashboard import router as dashboard_router
+api_router.include_router(dashboard_router)
 
