@@ -8,10 +8,11 @@ by aggregating movements via SUM.  This is an inviolable business rule.
 import logging
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.movement import Movement, TipoMovimiento
+from app.api.v1.websockets import manager
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,10 @@ async def crear_movimiento(
         monto,
         categoria,
     )
+
+    # ── Notify connected dashboard clients in real time ─────────
+    await manager.broadcast(usuario_id, "update_dashboard")
+
     return movement
 
 
@@ -127,3 +132,35 @@ async def calcular_saldo(usuario_id: int, db: AsyncSession) -> dict:
         "egresos_total": egresos_total,
         "saldo": saldo,
     }
+
+
+async def resetear_movimientos(usuario_id: int, db: AsyncSession) -> int:
+    """
+    Delete ALL movements for a given user.
+
+    The balance becomes 0 automatically because it is always computed
+    dynamically — no static column to update.
+
+    Parameters
+    ----------
+    usuario_id : int
+        The user whose movements to wipe.
+    db : AsyncSession
+        The async SQLAlchemy session.
+
+    Returns
+    -------
+    int
+        Number of rows deleted.
+    """
+    stmt = delete(Movement).where(Movement.usuario_id == usuario_id)
+    result = await db.execute(stmt)
+    await db.commit()
+
+    deleted = result.rowcount
+    logger.info("Reset: deleted %d movements for user=%d", deleted, usuario_id)
+
+    # ── Notify connected dashboard clients ──────────────────────
+    await manager.broadcast(usuario_id, "update_dashboard")
+
+    return deleted

@@ -1,12 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import {
   LogOut,
   Wallet,
   ShoppingBag,
-  Bell,
-  Plus,
+  Trash2,
   ArrowUpRight,
   ArrowDownRight,
   ChevronLeft,
@@ -177,18 +176,95 @@ export default function Dashboard() {
     fetchDashboard();
   }, [fetchDashboard]);
 
+  // ── WebSocket: real-time updates from backend ───────────────
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    // Decode the JWT payload to get the usuario_id (sub claim)
+    let usuarioId: string | null = null;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      usuarioId = payload.sub;
+    } catch {
+      return; // malformed token — skip WS
+    }
+    if (!usuarioId) return;
+
+    const ws = new WebSocket(`ws://127.0.0.1:8000/api/v1/dashboard/ws/${usuarioId}`);
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      if (event.data === 'update_dashboard') {
+        // Silent re-fetch without showing the loading spinner
+        fetchDashboard();
+      }
+    };
+
+    ws.onerror = () => {
+      // Non-critical; the dashboard still works via manual refresh
+    };
+
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [fetchDashboard]);
+
   // ── Handlers ────────────────────────────────────────────────
   const handleLogout = () => {
     localStorage.removeItem('token');
     navigate('/login', { replace: true });
   };
 
+  /** True when the active period already contains today (can't go forward). */
+  const isAtPresent = (() => {
+    const now = new Date();
+    switch (periodo) {
+      case 'day':
+        return toISODate(fechaReferencia) >= toISODate(now);
+      case 'month':
+        return (
+          fechaReferencia.getFullYear() >= now.getFullYear() &&
+          fechaReferencia.getMonth() >= now.getMonth()
+        );
+      case 'year':
+        return fechaReferencia.getFullYear() >= now.getFullYear();
+    }
+  })();
+
   const handlePrev = () => setFechaReferencia((prev) => shiftDate(prev, periodo, -1));
-  const handleNext = () => setFechaReferencia((prev) => shiftDate(prev, periodo, 1));
+  const handleNext = () => {
+    if (isAtPresent) return;
+    setFechaReferencia((prev) => shiftDate(prev, periodo, 1));
+  };
 
   const handlePeriodoChange = (p: Periodo) => {
     setPeriodo(p);
     setFechaReferencia(new Date()); // reset to today when switching tabs
+  };
+
+  const handleResetData = async () => {
+    if (!window.confirm('¿ESTÁS SEGURO? Esta acción borrará todo tu historial financiero y no se puede deshacer.')) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/v1/movimientos/reset', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) throw new Error('Error al resetear la cuenta');
+
+      // Re-fetch the dashboard to reflect the empty state
+      fetchDashboard();
+    } catch (err) {
+      alert('No se pudo resetear la cuenta. Intentá de nuevo.');
+    }
   };
 
   // ── Formatting helpers ──────────────────────────────────────
@@ -264,9 +340,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button className="text-ink-muted hover:text-ink transition relative bg-surface-muted p-2.5 rounded-full">
-              <Bell size={18} />
-            </button>
+
             <button
               onClick={handleLogout}
               className="text-ink-muted hover:text-red-600 transition bg-surface-muted p-2.5 rounded-full"
@@ -330,7 +404,12 @@ export default function Dashboard() {
             <button
               id="period-next"
               onClick={handleNext}
-              className="w-12 h-12 rounded-2xl bg-surface-muted flex items-center justify-center text-ink-muted hover:text-ink hover:bg-brand-50 active:scale-95 transition-all"
+              disabled={isAtPresent}
+              className={`w-12 h-12 rounded-2xl bg-surface-muted flex items-center justify-center transition-all
+                ${isAtPresent
+                  ? 'text-ink-muted/30 cursor-not-allowed'
+                  : 'text-ink-muted hover:text-ink hover:bg-brand-50 active:scale-95'
+                }`}
             >
               <ChevronRight size={22} strokeWidth={2.5} />
             </button>
@@ -368,7 +447,8 @@ export default function Dashboard() {
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="w-full h-full flex flex-col justify-center items-center rounded-full border-[1.5rem] border-surface-muted">
+              <div className="w-full h-full flex justify-center items-center">
+                <div className="w-56 h-56 rounded-full border-[1.25rem] border-surface-muted/40"></div>
               </div>
             )}
 
@@ -437,9 +517,12 @@ export default function Dashboard() {
 
       </main>
 
-      {/* FAB */}
-      <button className="fixed bottom-6 right-6 w-14 h-14 bg-brand-600 text-white rounded-2xl shadow-[0_8px_20px_rgba(45,138,45,0.4)] flex items-center justify-center hover:bg-brand-700 hover:scale-105 transition-all active:scale-95 z-50">
-        <Plus size={24} strokeWidth={2.5} />
+      {/* FAB — Reset account */}
+      <button
+        onClick={handleResetData}
+        className="fixed bottom-6 right-6 w-14 h-14 bg-red-500 text-white rounded-2xl shadow-[0_8px_20px_rgba(239,68,68,0.4)] flex items-center justify-center hover:bg-red-600 hover:scale-105 transition-all active:scale-95 z-50"
+      >
+        <Trash2 size={24} strokeWidth={2.5} />
       </button>
 
     </div>

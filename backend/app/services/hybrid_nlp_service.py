@@ -8,8 +8,9 @@ with Python regex; only ambiguous messages fall through to Groq.
 Processing order:
   1. Fast Path 1 — Balance / query keywords   → CONSULTA
   2. Fast Path 2 — <monto> <categoría>        → EGRESO
-  3. Fast Path 3 — <verbo> <monto> <categoría> → EGRESO
-  4. Slow Path   — LLM via extract_financial_data
+  3. Fast Path 3 — <verbo_gasto> <monto> <cat> → EGRESO
+  4. Fast Path 4 — <verbo_ingreso> <monto>     → INGRESO
+  5. Slow Path   — LLM via extract_financial_data
 """
 
 import logging
@@ -111,7 +112,16 @@ _RE_MONTO_CATEGORIA = re.compile(
 # pus → puse, puso
 _SPENDING_VERBS = r"(?:gast|pag|compr|carg|pus)[a-zñáéíóú]*"
 _RE_VERBO_MONTO_CATEGORIA = re.compile(
-    rf"^{_SPENDING_VERBS}\s+(\d+(?:[.,]\d{1,2})?)\s*(?:(?:en|de)\s+)?(.*)$",
+    rf"^{_SPENDING_VERBS}\s+(\d+(?:[.,]\d{{1,2}})?)\s*(?:(?:en|de)\s+)?(.*)$",
+)
+
+# ── Fast Path 4: <verbo_ingreso> <monto> [de|por] <concepto> ─────
+# cobr → cobré, cobro  |  recib → recibí, recibo
+# gan → gané, gano     |  ingres → ingresé, ingreso
+# sum → sumame, sumo
+_INCOME_VERBS = r"(?:cobr|recib|gan|ingres|sum)[a-zñáéíóú]*"
+_RE_INCOME = re.compile(
+    rf"^{_INCOME_VERBS}\s+(\d+(?:[.,]\d{{1,2}})?)\s*(?:(?:de|por)\s+)?(.*)$",
 )
 
 
@@ -131,6 +141,13 @@ def _normalizar_categoria(cat_raw: str | None) -> str:
         return "Otros"
     cat_limpia = cat_raw.strip().lower()
     return _MAPEO_CATEGORIAS.get(cat_limpia, cat_limpia.capitalize())
+
+
+def _normalizar_categoria_ingreso(cat_raw: str | None) -> str:
+    """Resolve income category — defaults to 'Ingreso' instead of 'Otros'."""
+    if not cat_raw or not cat_raw.strip():
+        return "Ingreso"
+    return cat_raw.strip().capitalize()
 
 
 def _build_result(
@@ -198,7 +215,7 @@ async def analyze_hybrid_message(texto: str) -> dict:
             nota=f"{monto} {categoria}",
         )
 
-    # ── Fast Path 3 — <verbo> <monto> [en|de] <categoría> ──────
+    # ── Fast Path 3 — <verbo_gasto> <monto> [en|de] <categoría> ─
     match = _RE_VERBO_MONTO_CATEGORIA.match(cleaned)
     if match:
         monto = _parse_monto(match.group(1))
@@ -213,6 +230,23 @@ async def analyze_hybrid_message(texto: str) -> dict:
             monto=monto,
             categoria=categoria,
             nota=f"Gasto {monto} en {categoria}",
+        )
+
+    # ── Fast Path 4 — <verbo_ingreso> <monto> [de|por] <concepto>
+    match = _RE_INCOME.match(cleaned)
+    if match:
+        monto = _parse_monto(match.group(1))
+        categoria = _normalizar_categoria_ingreso(match.group(2))
+        logger.info(
+            "💰 [FAST PATH LOCAL] Costo $0 - Ingreso detectado: monto=%.2f categoria='%s'",
+            monto,
+            categoria,
+        )
+        return _build_result(
+            tipo="INGRESO",
+            monto=monto,
+            categoria=categoria,
+            nota=f"Ingreso {monto} de {categoria}",
         )
 
     # ── Slow Path — delegate to LLM ──────────────────────────────

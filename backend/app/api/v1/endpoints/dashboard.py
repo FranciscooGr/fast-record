@@ -11,11 +11,12 @@ are scoped to the provided date window.
 
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_db, get_current_user
+from app.api.v1.websockets import manager
 from app.models.movement import Movement, TipoMovimiento
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -141,3 +142,15 @@ async def get_dashboard_summary(
             "end_date": end_date.isoformat(),
         },
     }
+
+
+@router.websocket("/ws/{usuario_id}")
+async def ws_dashboard(websocket: WebSocket, usuario_id: int):
+    """Keep a WebSocket open so the frontend receives live update signals."""
+    await manager.connect(usuario_id, websocket)
+    try:
+        while True:
+            # Keep the connection alive; ignore any client-sent frames
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(usuario_id, websocket)

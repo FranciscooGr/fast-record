@@ -23,3 +23,7 @@ api_router.include_router(webhook_router)
 from app.api.v1.endpoints.dashboard import router as dashboard_router
 api_router.include_router(dashboard_router)
 
+# ── Movimientos (reset, etc.) ──────────────────────────────
+from app.api.v1.endpoints.movimientos import router as movimientos_router
+api_router.include_router(movimientos_router)
+
