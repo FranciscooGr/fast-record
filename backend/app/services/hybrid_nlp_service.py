@@ -111,7 +111,7 @@ _RE_MONTO_CATEGORIA = re.compile(
 # pus → puse, puso
 _SPENDING_VERBS = r"(?:gast|pag|compr|carg|pus)[a-zñáéíóú]*"
 _RE_VERBO_MONTO_CATEGORIA = re.compile(
-    rf"^{_SPENDING_VERBS}\s+(\d+(?:[.,]\d{1,2})?)(?:\s+(?:en\s+|de\s+)?(.*))?$",
+    rf"^{_SPENDING_VERBS}\s+(\d+(?:[.,]\d{1,2})?)\s*(?:(?:en|de)\s+)?(.*)$",
 )
 
 
