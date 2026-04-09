@@ -1,22 +1,19 @@
 """
-Hybrid NLP Service — Fast Path (Regex) + Slow Path (LLM).
+Local NLP Service — 100 % Regex, zero external API calls.
 
-Implements the "Fast Path / Slow Path" architectural pattern to reduce
-LLM API costs.  Simple, deterministic messages are resolved locally
-with Python regex; only ambiguous messages fall through to Groq.
+All incoming messages are resolved deterministically with Python regex.
+No LLM provider is used; running costs are $0.
 
 Processing order:
   1. Fast Path 1 — Balance / query keywords   → CONSULTA
   2. Fast Path 2 — <monto> <categoría>        → EGRESO
   3. Fast Path 3 — <verbo_gasto> <monto> <cat> → EGRESO
   4. Fast Path 4 — <verbo_ingreso> <monto>     → INGRESO
-  5. Slow Path   — LLM via extract_financial_data
+  5. Default     — DESCONOCIDO (error determinista)
 """
 
 import logging
 import re
-
-from app.services.llm_service import extract_financial_data
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +169,7 @@ def _build_result(
 
 async def analyze_hybrid_message(texto: str) -> dict:
     """
-    Analyse an incoming message with regex first; fall back to LLM.
+    Analyse an incoming message using deterministic regex rules.
 
     Parameters
     ----------
@@ -249,9 +246,16 @@ async def analyze_hybrid_message(texto: str) -> dict:
             nota=f"Ingreso {monto} de {categoria}",
         )
 
-    # ── Slow Path — delegate to LLM ──────────────────────────────
-    logger.info(
-        "🤖 [SLOW PATH LLM] Regex falló. Delegando a IA externa para: '%s'",
+    # ── No match — deterministic rejection ────────────────────────
+    logger.warning(
+        "❌ [LOCAL ENGINE] Ninguna regex hizo match. Mensaje rechazado: '%s'",
         cleaned[:80],
     )
-    return await extract_financial_data(texto)
+    return _build_result(
+        tipo="DESCONOCIDO",
+        monto=0.0,
+        categoria="Error",
+        nota="No se pudo interpretar el mensaje.",
+        proveedor_usado="regex_local",
+        confianza=0.0,
+    )

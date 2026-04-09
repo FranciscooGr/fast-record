@@ -3,7 +3,7 @@ Bot Service — orchestrator for incoming WhatsApp messages.
 
 This is the central orchestrator that ties together:
   1. User lookup / auto-creation  (usuario_service)
-  2. LLM financial extraction     (llm_service)
+  2. Local NLP extraction          (hybrid_nlp_service — 100 % regex)
   3. Movement persistence         (movimiento_service)
   4. Dynamic balance calculation   (movimiento_service)
   5. JWT generation for dashboard  (core/security)
@@ -46,7 +46,7 @@ async def process_incoming_message(phone: str, text: str) -> None:
             user = await get_or_create_usuario(phone, db)
             logger.info("User resolved: id=%d phone=%s", user.id, phone)
 
-            # ── 2. Extract financial data (Regex → LLM fallback) ──
+            # ── 2. Extract financial data (100 % local regex) ───────
             llm_result = await analyze_hybrid_message(text)
             logger.info(
                 "NLP result: tipo=%s monto=%s cat=%s provider=%s",
@@ -55,6 +55,21 @@ async def process_incoming_message(phone: str, text: str) -> None:
                 llm_result.get("categoria"),
                 llm_result.get("proveedor_usado"),
             )
+
+            # ── 2b. Guard: reject unrecognised formats ──────────────
+            if llm_result["tipo"] == "DESCONOCIDO":
+                logger.warning(
+                    "Mensaje no reconocido de phone=%s: '%s'",
+                    phone,
+                    text[:80],
+                )
+                await send_whatsapp_message(
+                    phone,
+                    "🤖 No pude entender ese formato. "
+                    "Intentá usar: *pague [monto] en [categoría]* "
+                    "o *cobré [monto]*",
+                )
+                return
 
             tipo = llm_result.get("tipo", "EGRESO")
             monto = float(llm_result.get("monto", 0))

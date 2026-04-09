@@ -18,10 +18,6 @@ class Settings(BaseSettings):
     WHATSAPP_API_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
 
-    # ── LLM Providers ───────────────────────────────────────────
-    GEMINI_API_KEY: str = ""
-    GROQ_API_KEY: str = ""
-
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
