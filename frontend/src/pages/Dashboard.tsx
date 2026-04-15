@@ -146,9 +146,12 @@ export default function Dashboard() {
     const [startDate, endDate] = getDateRange(periodo, fechaReferencia);
 
     try {
+      const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+      // 2. Reemplazamos el http://... fijo por la variable ${API_URL}
       const res = await fetch(
-        `http://127.0.0.1:8000/api/v1/dashboard/summary?start_date=${startDate}&end_date=${endDate}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        `${API_URL}/api/v1/dashboard/summary?start_date=${startDate}&end_date=${endDate}`,
+        { headers: { Authorization: `Bearer ${token}` } }
       );
 
       if (res.status === 401) {
@@ -193,7 +196,14 @@ export default function Dashboard() {
     }
     if (!usuarioId) return;
 
-    const ws = new WebSocket(`ws://127.0.0.1:8000/api/v1/dashboard/ws/${usuarioId}`);
+    const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+    // 2. Truco de magia: cambiamos "http" por "ws" 
+    // (Esto convierte "http://..." a "ws://..." en tu compu, y "https://..." a "wss://..." en Vercel)
+    const WS_URL = API_URL.replace(/^http/, "ws");
+
+    // 3. Usamos la URL convertida para abrir el WebSocket
+    const ws = new WebSocket(`${WS_URL}/api/v1/dashboard/ws/${usuarioId}`);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -253,7 +263,10 @@ export default function Dashboard() {
     if (!token) return;
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/v1/movimientos/reset', {
+      const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+      // 2. Reemplazamos la parte local por la variable
+      const res = await fetch(`${API_URL}/api/v1/movimientos/reset`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
