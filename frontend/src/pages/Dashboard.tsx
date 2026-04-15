@@ -58,7 +58,7 @@ function toISODate(d: Date): string {
 function getDateRange(periodo: Periodo, ref: Date): [string, string] {
   const year = ref.getFullYear();
   const month = ref.getMonth();
-  const day = ref.getDate();
+
 
   switch (periodo) {
     case 'day':
