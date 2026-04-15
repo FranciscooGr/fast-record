@@ -51,7 +51,7 @@ export default function Login() {
 
         {/* Enlace estático al bot, reemplazar '1234567890' con el num de WP */}
         <a
-          href="https://wa.me/+15551398533"
+          href="https://wa.me/+15055816239"
           target="_blank"
           rel="noopener noreferrer"
           className="w-full bg-brand-600 text-white font-medium py-3.5 px-4 rounded-xl flex items-center justify-center gap-2.5 hover:bg-brand-700 transition duration-200 active:scale-[0.98] shadow-[0_4px_14px_0_rgba(45,138,45,0.39)] hover:shadow-[0_6px_20px_rgba(45,138,45,0.23)]"
