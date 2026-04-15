@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     WHATSAPP_VERIFY_TOKEN: str = ""
     WHATSAPP_API_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WABA_ID: str = ""
 
     model_config = {
         "env_file": ".env",
