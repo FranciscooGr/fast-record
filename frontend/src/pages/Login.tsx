@@ -49,7 +49,7 @@ export default function Login() {
           </li>
         </ol>
 
-        {/* Enlace estático al bot, reemplazar '1234567890' con el num de WP */}
+
         <a
           href="https://wa.me/+15055816239"
           target="_blank"

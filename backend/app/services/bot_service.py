@@ -95,13 +95,13 @@ async def process_incoming_message(phone: str, text: str) -> None:
             token = create_access_token(data={"sub": str(user.id)})
 
             # ── 6. Compose and send WhatsApp response ──────────────
-            frontend_url = f"http://localhost:5173/login?token={token}"
+            frontend_url = f"https://fast-record.vercel.app/login?token={token}"
             if tipo == "CONSULTA":
                 mensaje = (
                     f"💰 Tu saldo actual es: ${saldo:,.2f}\n"
                     f"📈 Ingresos totales: ${saldo_data['ingresos_total']:,.2f}\n"
                     f"📉 Egresos totales: ${saldo_data['egresos_total']:,.2f}\n"
-f"\n🔗 Tu panel: {frontend_url}"                )
+                    f"\n🔗 Tu panel: {frontend_url}"                )
             else:
                 tipo_label = "ingreso" if tipo == "INGRESO" else "gasto"
                 mensaje = (
