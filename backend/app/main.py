@@ -12,7 +12,9 @@ from fastapi import FastAPI
 
 from app.api.v1.router import api_router
 from app.core.logging import setup_logging
-from app.db.session import engine
+from app.db.session import Base, engine
+from app.models.user import User  # noqa: F401
+from app.models.movement import Movement  # noqa: F401
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,6 +22,9 @@ logging.basicConfig(level=logging.INFO)
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────
     setup_logging()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logging.getLogger(__name__).info("Database tables created / verified.")
     yield
     # ── Shutdown ─────────────────────────────────────────────
     await engine.dispose()

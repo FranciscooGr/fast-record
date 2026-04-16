@@ -198,8 +198,7 @@ export default function Dashboard() {
 
     const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
-    // 2. Truco de magia: cambiamos "http" por "ws" 
-    // (Esto convierte "http://..." a "ws://..." en tu compu, y "https://..." a "wss://..." en Vercel)
+
     const WS_URL = API_URL.replace(/^http/, "ws");
 
     // 3. Usamos la URL convertida para abrir el WebSocket
