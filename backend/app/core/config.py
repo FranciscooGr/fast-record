@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     WHATSAPP_PHONE_NUMBER_ID: str = ""
     WABA_ID: str = ""
 
+    # ── Frontend ────────────────────────────────────────────────
+    FRONTEND_URL: str = "https://fast-record.vercel.app"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

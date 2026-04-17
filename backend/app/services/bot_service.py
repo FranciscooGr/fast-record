@@ -6,15 +6,14 @@ This is the central orchestrator that ties together:
   2. Local NLP extraction          (hybrid_nlp_service — 100 % regex)
   3. Movement persistence         (movimiento_service)
   4. Dynamic balance calculation   (movimiento_service)
-  5. JWT generation for dashboard  (core/security)
-  6. WhatsApp response delivery    (whatsapp_service)
+  5. WhatsApp response delivery    (whatsapp_service)
 
 This function runs as a BackgroundTask, so it manages its own DB session.
 """
 
 import logging
 
-from app.core.security import create_access_token
+from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.services.hybrid_nlp_service import analyze_hybrid_message
 from app.services.movimiento_service import calcular_saldo, crear_movimiento
@@ -22,6 +21,16 @@ from app.services.usuario_service import get_or_create_usuario
 from app.services.whatsapp_service import send_whatsapp_message
 
 logger = logging.getLogger(__name__)
+
+# ── Onboarding / help message ──────────────────────────────────
+MSG_AYUDA = (
+    "🤖 ¡Hola! Soy FastRecord.\n\n"
+    "Para registrar un movimiento o consultar saldo, usá este formato:\n"
+    "?: Saldo\n"
+    "🟢 Ingresos: 'cobré 10000 de sueldo'\n"
+    "🔴 Gastos: 'pague 2000 en comida'\n\n"
+    "¡Escribime tu primer movimiento!"
+)
 
 
 async def process_incoming_message(phone: str, text: str) -> None:
@@ -43,8 +52,19 @@ async def process_incoming_message(phone: str, text: str) -> None:
     try:
         async with AsyncSessionLocal() as db:
             # ── 1. Get or create user ──────────────────────────────
-            user = await get_or_create_usuario(phone, db)
-            logger.info("User resolved: id=%d phone=%s", user.id, phone)
+            user, is_new = await get_or_create_usuario(phone, db)
+            logger.info(
+                "User resolved: id=%d phone=%s is_new=%s",
+                user.id,
+                phone,
+                is_new,
+            )
+
+            # ── 1b. Onboarding: greet new users and stop ───────────
+            if is_new:
+                await send_whatsapp_message(phone, MSG_AYUDA)
+                logger.info("Onboarding message sent to new user phone=%s", phone)
+                return
 
             # ── 2. Extract financial data (100 % local regex) ───────
             llm_result = await analyze_hybrid_message(text)
@@ -63,12 +83,7 @@ async def process_incoming_message(phone: str, text: str) -> None:
                     phone,
                     text[:80],
                 )
-                await send_whatsapp_message(
-                    phone,
-                    "🤖 No pude entender ese formato. "
-                    "Intentá usar: *pague [monto] en [categoría]* "
-                    "o *cobré [monto]*",
-                )
+                await send_whatsapp_message(phone, MSG_AYUDA)
                 return
 
             tipo = llm_result.get("tipo", "EGRESO")
@@ -91,17 +106,17 @@ async def process_incoming_message(phone: str, text: str) -> None:
             saldo_data = await calcular_saldo(user.id, db)
             saldo = saldo_data["saldo"]
 
-            # ── 5. Generate temporary JWT for dashboard access ─────
-            token = create_access_token(data={"sub": str(user.id)})
+            # ── 5. Build clean dashboard URL with public_id ────────
+            frontend_url = f"{settings.FRONTEND_URL}/d/{user.public_id}"
 
             # ── 6. Compose and send WhatsApp response ──────────────
-            frontend_url = f"https://fast-record.vercel.app/login?token={token}"
             if tipo == "CONSULTA":
                 mensaje = (
                     f"💰 Tu saldo actual es: ${saldo:,.2f}\n"
                     f"📈 Ingresos totales: ${saldo_data['ingresos_total']:,.2f}\n"
                     f"📉 Egresos totales: ${saldo_data['egresos_total']:,.2f}\n"
-                    f"\n🔗 Tu panel: {frontend_url}"                )
+                    f"\n🔗 Tu panel: {frontend_url}"
+                )
             else:
                 tipo_label = "ingreso" if tipo == "INGRESO" else "gasto"
                 mensaje = (

@@ -1,22 +1,6 @@
-import { useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MessageSquare, ShieldAlert } from 'lucide-react';
 
 export default function Login() {
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    // 1. Atrapar el token mágico de la URL
-    const token = searchParams.get('token');
-
-    // 2. Si hay token, lo guardamos y hacemos redirección limpia
-    if (token) {
-      localStorage.setItem('token', token);
-      navigate('/dashboard', { replace: true });
-    }
-  }, [searchParams, navigate]);
-
   return (
     <div className="min-h-screen bg-surface flex flex-col items-center justify-center p-6 sm:p-12 text-center selection:bg-brand-200">
 
@@ -41,11 +25,11 @@ export default function Login() {
           </li>
           <li className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0 text-xs font-bold shadow-sm">2</span>
-            <span className="leading-snug pt-0.5">Escribe la palabra <strong className="text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded-md font-semibold">link</strong>.</span>
+            <span className="leading-snug pt-0.5">Registrá un movimiento, por ejemplo: <strong className="text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded-md font-semibold">cobré 5000 de sueldo</strong>.</span>
           </li>
           <li className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0 text-xs font-bold shadow-sm">3</span>
-            <span className="leading-snug pt-0.5">Haz clic en el enlace mágico para continuar.</span>
+            <span className="leading-snug pt-0.5">Hacé clic en el enlace del panel que te envía el bot.</span>
           </li>
         </ol>
 

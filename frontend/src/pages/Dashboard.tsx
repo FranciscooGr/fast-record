@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import {
-  LogOut,
   Wallet,
   ShoppingBag,
   Trash2,
@@ -123,7 +122,8 @@ function getPeriodLabel(periodo: Periodo, ref: Date): string {
    Component
    ═══════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
-  const navigate = useNavigate();
+  const { publicId } = useParams<{ publicId: string }>();
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -134,11 +134,7 @@ export default function Dashboard() {
 
   // ── Fetch dashboard data ────────────────────────────────────
   const fetchDashboard = useCallback(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login', { replace: true });
-      return;
-    }
+    if (!publicId) return;
 
     setLoading(true);
     setError(null);
@@ -148,15 +144,12 @@ export default function Dashboard() {
     try {
       const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
-      // 2. Reemplazamos el http://... fijo por la variable ${API_URL}
       const res = await fetch(
-        `${API_URL}/api/v1/dashboard/summary?start_date=${startDate}&end_date=${endDate}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        `${API_URL}/api/v1/dashboard/summary?public_id=${publicId}&start_date=${startDate}&end_date=${endDate}`
       );
 
-      if (res.status === 401) {
-        localStorage.removeItem('token');
-        navigate('/login', { replace: true });
+      if (res.status === 404) {
+        setError('Usuario no encontrado.');
         return;
       }
 
@@ -173,7 +166,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [navigate, periodo, fechaReferencia]);
+  }, [publicId, periodo, fechaReferencia]);
 
   useEffect(() => {
     fetchDashboard();
@@ -183,26 +176,12 @@ export default function Dashboard() {
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    // Decode the JWT payload to get the usuario_id (sub claim)
-    let usuarioId: string | null = null;
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      usuarioId = payload.sub;
-    } catch {
-      return; // malformed token — skip WS
-    }
-    if (!usuarioId) return;
+    if (!publicId) return;
 
     const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-
-
     const WS_URL = API_URL.replace(/^http/, "ws");
 
-    // 3. Usamos la URL convertida para abrir el WebSocket
-    const ws = new WebSocket(`${WS_URL}/api/v1/dashboard/ws/${usuarioId}`);
+    const ws = new WebSocket(`${WS_URL}/api/v1/dashboard/ws/${publicId}`);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -220,13 +199,9 @@ export default function Dashboard() {
       ws.close();
       wsRef.current = null;
     };
-  }, [fetchDashboard]);
+  }, [publicId, fetchDashboard]);
 
   // ── Handlers ────────────────────────────────────────────────
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/login', { replace: true });
-  };
 
   /** True when the active period already contains today (can't go forward). */
   const isAtPresent = (() => {
@@ -257,17 +232,13 @@ export default function Dashboard() {
 
   const handleResetData = async () => {
     if (!window.confirm('¿ESTÁS SEGURO? Esta acción borrará todo tu historial financiero y no se puede deshacer.')) return;
-
-    const token = localStorage.getItem('token');
-    if (!token) return;
+    if (!publicId) return;
 
     try {
       const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
-      // 2. Reemplazamos la parte local por la variable
-      const res = await fetch(`${API_URL}/api/v1/movimientos/reset`, {
+      const res = await fetch(`${API_URL}/api/v1/movimientos/reset?public_id=${publicId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!res.ok) throw new Error('Error al resetear la cuenta');
@@ -350,15 +321,6 @@ export default function Dashboard() {
               <h1 className="font-bold text-ink leading-tight text-lg">Fast Record</h1>
               <p className="text-[10px] uppercase font-bold tracking-widest text-ink-muted">Management</p>
             </div>
-          </div>
-          <div className="flex items-center gap-4">
-
-            <button
-              onClick={handleLogout}
-              className="text-ink-muted hover:text-red-600 transition bg-surface-muted p-2.5 rounded-full"
-            >
-              <LogOut size={18} />
-            </button>
           </div>
         </div>
 

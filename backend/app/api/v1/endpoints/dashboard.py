@@ -1,7 +1,10 @@
 """
 Dashboard endpoint — returns summary data filtered by date range.
 
+Access is keyed by ``public_id`` (8-char UUID slug) — no JWT required.
+
 Query parameters:
+  - public_id  (required): The user's public identifier.
   - start_date (optional): ISO date string (YYYY-MM-DD). Defaults to 1st of current month.
   - end_date   (optional): ISO date string (YYYY-MM-DD). Defaults to today.
 
@@ -15,9 +18,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import get_db, get_current_user
+from app.api.v1.deps import get_db
 from app.api.v1.websockets import manager
+from app.db.session import AsyncSessionLocal
 from app.models.movement import Movement, TipoMovimiento
+from app.models.user import User
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -28,17 +33,25 @@ def _default_date_range() -> tuple[date, date]:
     return today.replace(day=1), today
 
 
+async def _resolve_user_by_public_id(public_id: str, db: AsyncSession) -> User:
+    """Look up a user by public_id or raise 404."""
+    stmt = select(User).where(User.public_id == public_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
 @router.get("/summary")
 async def get_dashboard_summary(
+    public_id: str = Query(..., description="Public ID of the user"),
     start_date: date | None = Query(None, description="Start of period (YYYY-MM-DD)"),
     end_date: date | None = Query(None, description="End of period (YYYY-MM-DD)"),
-    current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    try:
-        user_id = int(current_user["sub"])
-    except (KeyError, ValueError):
-        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await _resolve_user_by_public_id(public_id, db)
+    user_id = user.id
 
     # ── Resolve date range (defaults to current month) ──────────
     if start_date is None or end_date is None:
@@ -144,9 +157,20 @@ async def get_dashboard_summary(
     }
 
 
-@router.websocket("/ws/{usuario_id}")
-async def ws_dashboard(websocket: WebSocket, usuario_id: int):
+@router.websocket("/ws/{public_id}")
+async def ws_dashboard(websocket: WebSocket, public_id: str):
     """Keep a WebSocket open so the frontend receives live update signals."""
+    # Resolve internal user_id from public_id
+    async with AsyncSessionLocal() as db:
+        stmt = select(User).where(User.public_id == public_id)
+        result = await db.execute(stmt)
+        user = result.scalar_one_or_none()
+
+    if user is None:
+        await websocket.close(code=4004)
+        return
+
+    usuario_id = user.id
     await manager.connect(usuario_id, websocket)
     try:
         while True:
