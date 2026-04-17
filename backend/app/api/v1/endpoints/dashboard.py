@@ -14,12 +14,13 @@ are scoped to the provided date window.
 
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_db
 from app.api.v1.websockets import manager
+from app.core.limiter import limiter
 from app.db.session import AsyncSessionLocal
 from app.models.movement import Movement, TipoMovimiento
 from app.models.user import User
@@ -44,7 +45,9 @@ async def _resolve_user_by_public_id(public_id: str, db: AsyncSession) -> User:
 
 
 @router.get("/summary")
+@limiter.limit("15/minute")
 async def get_dashboard_summary(
+    request: Request,
     public_id: str = Query(..., description="Public ID of the user"),
     start_date: date | None = Query(None, description="Start of period (YYYY-MM-DD)"),
     end_date: date | None = Query(None, description="End of period (YYYY-MM-DD)"),

@@ -61,8 +61,9 @@ async def verify_webhook(
     summary="Receive WhatsApp messages",
     description=(
         "Receives the incoming webhook payload from Meta. "
-        "Extracts the phone number and text from the first message, "
-        "ignoring status/read notifications. Delegates processing "
+        "Extracts the phone number and content from the first message, "
+        "supporting both text and PDF document types. "
+        "Ignoring status/read notifications. Delegates processing "
         "to bot_service as a background task and returns 200 OK immediately."
     ),
 )
@@ -86,39 +87,77 @@ async def receive_webhook(
                 messages = value.get("messages", [])
 
                 for message in messages:
-                    # Only process text messages
-                    if message.get("type") != "text":
-                        logger.debug(
-                            "Skipping non-text message type=%s",
-                            message.get("type"),
-                        )
-                        continue
-
+                    msg_type = message.get("type")
                     phone = message.get("from", "")
-                    text = message.get("text", {}).get("body", "")
 
                     # --- PARCHE ARGENTINA: Quitar el 9 después del 54 ---
                     if phone.startswith("549") and len(phone) == 13:
-                        logger.info("Aplicando parche AR: limpiando el 9 del número %s", phone)
+                        logger.info(
+                            "Aplicando parche AR: limpiando el 9 del número %s",
+                            phone,
+                        )
                         phone = "54" + phone[3:]
                     # ----------------------------------------------------
 
-                    if not phone or not text:
+                    text = ""
+                    media_id: str | None = None
+
+                    # ── Text messages ───────────────────────────
+                    if msg_type == "text":
+                        text = message.get("text", {}).get("body", "")
+
+                    # ── Document messages (PDF receipts) ────────
+                    elif msg_type == "document":
+                        doc = message.get("document", {})
+                        mime_type = doc.get("mime_type", "")
+
+                        if mime_type != "application/pdf":
+                            logger.debug(
+                                "Skipping non-PDF document: mime_type=%s",
+                                mime_type,
+                            )
+                            continue
+
+                        media_id = doc.get("id", "")
+                        if not media_id:
+                            logger.warning(
+                                "PDF document without media_id — skipping"
+                            )
+                            continue
+
+                        logger.info(
+                            "PDF document received: media_id=%s from=%s",
+                            media_id,
+                            phone,
+                        )
+
+                    else:
+                        logger.debug(
+                            "Skipping unsupported message type=%s",
+                            msg_type,
+                        )
+                        continue
+
+                    if not phone or (not text and not media_id):
                         logger.warning(
-                            "Message with empty phone or text — skipping"
+                            "Message with empty phone or content — skipping"
                         )
                         continue
 
                     logger.info(
-                        "Queueing message processing: from=%s text=%s",
+                        "Queueing message processing: from=%s type=%s "
+                        "text=%s media_id=%s",
                         phone,
-                        text[:80],
+                        msg_type,
+                        text[:80] if text else "(pdf)",
+                        media_id or "N/A",
                     )
 
                     background_tasks.add_task(
                         process_incoming_message,
                         phone,
                         text,
+                        media_id,
                     )
 
     except Exception as exc:

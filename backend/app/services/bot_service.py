@@ -3,10 +3,11 @@ Bot Service — orchestrator for incoming WhatsApp messages.
 
 This is the central orchestrator that ties together:
   1. User lookup / auto-creation  (usuario_service)
-  2. Local NLP extraction          (hybrid_nlp_service — 100 % regex)
-  3. Movement persistence         (movimiento_service)
-  4. Dynamic balance calculation   (movimiento_service)
-  5. WhatsApp response delivery    (whatsapp_service)
+  2. PDF receipt extraction        (pdf_service + whatsapp_service)
+  3. Local NLP extraction          (hybrid_nlp_service — 100 % regex)
+  4. Movement persistence         (movimiento_service)
+  5. Dynamic balance calculation   (movimiento_service)
+  6. WhatsApp response delivery    (whatsapp_service)
 
 This function runs as a BackgroundTask, so it manages its own DB session.
 """
@@ -17,8 +18,12 @@ from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.services.hybrid_nlp_service import analyze_hybrid_message
 from app.services.movimiento_service import calcular_saldo, crear_movimiento
+from app.services.pdf_service import extract_text_from_pdf_bytes
 from app.services.usuario_service import get_or_create_usuario
-from app.services.whatsapp_service import send_whatsapp_message
+from app.services.whatsapp_service import (
+    download_whatsapp_media,
+    send_whatsapp_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +33,26 @@ MSG_AYUDA = (
     "Para registrar un movimiento o consultar saldo, usá este formato:\n"
     "?: Saldo\n"
     "🟢 Ingresos: 'cobré 10000 de sueldo'\n"
-    "🔴 Gastos: 'pague 2000 en comida'\n\n"
+    "🔴 Gastos: 'pague 2000 en comida'\n"
+    "📄 También podés enviarme un comprobante de pago en PDF.\n\n"
     "¡Escribime tu primer movimiento!"
 )
 
+# ── PDF-specific error message ─────────────────────────────────
+MSG_PDF_NO_ENTENDIDO = (
+    "❌ Uy, no pude extraer los datos de este PDF.\n"
+    "Por ahora solo entiendo comprobantes de transferencia "
+    "de Mercado Pago.\n\n"
+    "Si querés, escribí el monto manualmente:\n"
+    "Ej: 'pagué 18000 en cine'"
+)
 
-async def process_incoming_message(phone: str, text: str) -> None:
+
+async def process_incoming_message(
+    phone: str,
+    text: str,
+    media_id: str | None = None,
+) -> None:
     """
     Full orchestration flow for an incoming WhatsApp message.
 
@@ -45,9 +64,18 @@ async def process_incoming_message(phone: str, text: str) -> None:
     phone : str
         The sender's phone number (international format).
     text : str
-        The raw text message from the user.
+        The raw text message from the user. Empty string when
+        the message is a document/PDF.
+    media_id : str | None
+        If present, the Meta media ID for a PDF document
+        that needs to be downloaded and OCR'd.
     """
-    logger.info("Processing message from=%s text=%s", phone, text[:80])
+    logger.info(
+        "Processing message from=%s text=%s media_id=%s",
+        phone,
+        text[:80] if text else "(pdf)",
+        media_id or "N/A",
+    )
 
     try:
         async with AsyncSessionLocal() as db:
@@ -66,8 +94,65 @@ async def process_incoming_message(phone: str, text: str) -> None:
                 logger.info("Onboarding message sent to new user phone=%s", phone)
                 return
 
-            # ── 2. Extract financial data (100 % local regex) ───────
-            llm_result = await analyze_hybrid_message(text)
+            # ── 2. Resolve texto_usuario from text or PDF ──────────
+            texto_usuario: str = text
+            es_documento: bool = bool(media_id)
+
+            if media_id:
+                # ── 2a. PDF document path ──────────────────────────
+                await send_whatsapp_message(
+                    phone,
+                    "📄 Recibí tu comprobante, lo estoy analizando...",
+                )
+
+                try:
+                    pdf_bytes = await download_whatsapp_media(media_id)
+                    pdf_text = extract_text_from_pdf_bytes(pdf_bytes)
+                    texto_usuario = f"Comprobante de pago: {pdf_text}"
+                    logger.info(
+                        "PDF processed for phone=%s: %d chars extracted",
+                        phone,
+                        len(pdf_text),
+                    )
+                except ValueError as exc:
+                    # PDF with no extractable text (scan, image-based)
+                    await send_whatsapp_message(
+                        phone,
+                        f"⚠️ No pude leer el PDF: {exc}\n"
+                        "Intentá enviar el comprobante como imagen o "
+                        "escribí el monto manualmente.",
+                    )
+                    logger.warning(
+                        "PDF text extraction failed for phone=%s: %s",
+                        phone,
+                        str(exc),
+                    )
+                    return
+                except Exception as exc:
+                    await send_whatsapp_message(
+                        phone,
+                        "❌ Hubo un error al procesar tu comprobante. "
+                        "Por favor, intentá de nuevo o escribí el monto "
+                        "manualmente.",
+                    )
+                    logger.error(
+                        "PDF processing FAILED for phone=%s media_id=%s: %s",
+                        phone,
+                        media_id,
+                        str(exc),
+                        exc_info=True,
+                    )
+                    return
+
+            # Guard: if we still have no text (shouldn't happen)
+            if not texto_usuario:
+                logger.warning(
+                    "No text to process for phone=%s — skipping", phone
+                )
+                return
+
+            # ── 3. Extract financial data (100 % local regex) ───────
+            llm_result = await analyze_hybrid_message(texto_usuario)
             logger.info(
                 "NLP result: tipo=%s monto=%s cat=%s provider=%s",
                 llm_result.get("tipo"),
@@ -76,14 +161,19 @@ async def process_incoming_message(phone: str, text: str) -> None:
                 llm_result.get("proveedor_usado"),
             )
 
-            # ── 2b. Guard: reject unrecognised formats ──────────────
+            # ── 3b. Guard: reject unrecognised formats ──────────────
             if llm_result["tipo"] == "DESCONOCIDO":
                 logger.warning(
-                    "Mensaje no reconocido de phone=%s: '%s'",
+                    "Mensaje no reconocido de phone=%s es_documento=%s: '%s'",
                     phone,
-                    text[:80],
+                    es_documento,
+                    texto_usuario[:80],
                 )
-                await send_whatsapp_message(phone, MSG_AYUDA)
+                if es_documento:
+                    # UX: PDF-specific error — don't show generic onboarding
+                    await send_whatsapp_message(phone, MSG_PDF_NO_ENTENDIDO)
+                else:
+                    await send_whatsapp_message(phone, MSG_AYUDA)
                 return
 
             tipo = llm_result.get("tipo", "EGRESO")
@@ -91,7 +181,7 @@ async def process_incoming_message(phone: str, text: str) -> None:
             categoria = llm_result.get("categoria", "Otros")
             nota = llm_result.get("nota", "")
 
-            # ── 3. Persist movement (only INGRESO / EGRESO) ────────
+            # ── 4. Persist movement (only INGRESO / EGRESO) ────────
             if tipo in ("INGRESO", "EGRESO") and monto > 0:
                 await crear_movimiento(
                     usuario_id=user.id,
@@ -102,14 +192,14 @@ async def process_incoming_message(phone: str, text: str) -> None:
                     db=db,
                 )
 
-            # ── 4. Calculate dynamic balance ───────────────────────
+            # ── 5. Calculate dynamic balance ───────────────────────
             saldo_data = await calcular_saldo(user.id, db)
             saldo = saldo_data["saldo"]
 
-            # ── 5. Build clean dashboard URL with public_id ────────
+            # ── 6. Build clean dashboard URL with public_id ────────
             frontend_url = f"{settings.FRONTEND_URL}/d/{user.public_id}"
 
-            # ── 6. Compose and send WhatsApp response ──────────────
+            # ── 7. Compose and send WhatsApp response ──────────────
             if tipo == "CONSULTA":
                 mensaje = (
                     f"💰 Tu saldo actual es: ${saldo:,.2f}\n"
@@ -119,8 +209,9 @@ async def process_incoming_message(phone: str, text: str) -> None:
                 )
             else:
                 tipo_label = "ingreso" if tipo == "INGRESO" else "gasto"
+                source_label = " (desde comprobante)" if media_id else ""
                 mensaje = (
-                    f"✅ Registrado. Tu {tipo_label} de ${monto:,.2f} "
+                    f"✅ Registrado{source_label}. Tu {tipo_label} de ${monto:,.2f} "
                     f"en '{categoria}' fue guardado.\n"
                     f"💰 Saldo: ${saldo:,.2f}\n"
                     f"\n🔗 Tu panel: {frontend_url}"
