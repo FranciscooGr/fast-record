@@ -4,9 +4,13 @@ WhatsApp Webhook endpoints.
 GET  /webhook — Meta verification handshake.
 POST /webhook — Incoming message receiver (delegates to bot_service
                via BackgroundTasks for immediate 200 OK response).
+
+Includes an in-memory idempotency shield to prevent duplicate
+processing when Meta retries webhooks during slow media downloads.
 """
 
 import logging
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi.responses import PlainTextResponse, Response
@@ -17,6 +21,40 @@ from app.services.bot_service import process_incoming_message
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
+
+
+# ── Idempotency shield ──────────────────────────────────────────
+# In-memory cache of recently processed message IDs.
+# Key: message_id (str), Value: monotonic timestamp (float).
+# TTL = 5 minutes — stale entries are lazily evicted per request.
+_processed_messages: dict[str, float] = {}
+_IDEMPOTENCY_TTL_SECONDS: int = 300  # 5 min
+
+
+def _is_duplicate(message_id: str) -> bool:
+    """Check if a message_id was already processed.
+
+    Returns True (duplicate) if the ID exists in cache.
+    Returns False (new) and registers the ID otherwise.
+    Performs lazy eviction of expired entries (capped at 100 per call).
+    """
+    now = time.monotonic()
+
+    # Lazy cleanup — evict expired entries, cap at 100 to avoid
+    # blocking the event loop during traffic spikes
+    stale_keys = [
+        k
+        for k, ts in _processed_messages.items()
+        if now - ts > _IDEMPOTENCY_TTL_SECONDS
+    ]
+    for k in stale_keys[:100]:
+        del _processed_messages[k]
+
+    if message_id in _processed_messages:
+        return True
+
+    _processed_messages[message_id] = now
+    return False
 
 
 @router.get(
@@ -62,7 +100,7 @@ async def verify_webhook(
     description=(
         "Receives the incoming webhook payload from Meta. "
         "Extracts the phone number and content from the first message, "
-        "supporting both text and PDF document types. "
+        "supporting text, PDF document and image types. "
         "Ignoring status/read notifications. Delegates processing "
         "to bot_service as a background task and returns 200 OK immediately."
     ),
@@ -87,6 +125,15 @@ async def receive_webhook(
                 messages = value.get("messages", [])
 
                 for message in messages:
+                    # ── Idempotency check ────────────────────────
+                    message_id = message.get("id", "")
+                    if message_id and _is_duplicate(message_id):
+                        logger.info(
+                            "Duplicate message_id=%s — skipping",
+                            message_id,
+                        )
+                        continue
+
                     msg_type = message.get("type")
                     phone = message.get("from", "")
 
@@ -101,6 +148,7 @@ async def receive_webhook(
 
                     text = ""
                     media_id: str | None = None
+                    media_type: str = "pdf"  # default, overridden per type
 
                     # ── Text messages ───────────────────────────
                     if msg_type == "text":
@@ -125,8 +173,26 @@ async def receive_webhook(
                             )
                             continue
 
+                        media_type = "pdf"
                         logger.info(
                             "PDF document received: media_id=%s from=%s",
+                            media_id,
+                            phone,
+                        )
+
+                    # ── Image messages (photo receipts) ─────────
+                    elif msg_type == "image":
+                        img = message.get("image", {})
+                        media_id = img.get("id", "")
+                        if not media_id:
+                            logger.warning(
+                                "Image without media_id — skipping"
+                            )
+                            continue
+
+                        media_type = "image"
+                        logger.info(
+                            "Image received: media_id=%s from=%s",
                             media_id,
                             phone,
                         )
@@ -146,11 +212,12 @@ async def receive_webhook(
 
                     logger.info(
                         "Queueing message processing: from=%s type=%s "
-                        "text=%s media_id=%s",
+                        "text=%s media_id=%s media_type=%s",
                         phone,
                         msg_type,
-                        text[:80] if text else "(pdf)",
+                        text[:80] if text else "(media)",
                         media_id or "N/A",
+                        media_type,
                     )
 
                     background_tasks.add_task(
@@ -158,6 +225,7 @@ async def receive_webhook(
                         phone,
                         text,
                         media_id,
+                        media_type,
                     )
 
     except Exception as exc:

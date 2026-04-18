@@ -3,7 +3,7 @@ Bot Service — orchestrator for incoming WhatsApp messages.
 
 This is the central orchestrator that ties together:
   1. User lookup / auto-creation  (usuario_service)
-  2. PDF receipt extraction        (pdf_service + whatsapp_service)
+  2. Document extraction           (document_service — PDF & Image OCR)
   3. Local NLP extraction          (hybrid_nlp_service — 100 % regex)
   4. Movement persistence         (movimiento_service)
   5. Dynamic balance calculation   (movimiento_service)
@@ -16,9 +16,16 @@ import logging
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
+from app.services.document_service import (
+    extract_text_from_image_bytes,
+    extract_text_from_pdf_bytes,
+)
 from app.services.hybrid_nlp_service import analyze_hybrid_message
-from app.services.movimiento_service import calcular_saldo, crear_movimiento
-from app.services.pdf_service import extract_text_from_pdf_bytes
+from app.services.movimiento_service import (
+    calcular_saldo,
+    crear_movimiento,
+    undo_last_movement,
+)
 from app.services.usuario_service import get_or_create_usuario
 from app.services.whatsapp_service import (
     download_whatsapp_media,
@@ -31,16 +38,25 @@ logger = logging.getLogger(__name__)
 MSG_AYUDA = (
     "🤖 ¡Hola! Soy FastRecord.\n\n"
     "Para registrar un movimiento o consultar saldo, usá este formato:\n"
-    "?: Saldo\n"
+    "Para consultar saldo -> : Saldo\n"
     "🟢 Ingresos: 'cobré 10000 de sueldo'\n"
     "🔴 Gastos: 'pague 2000 en comida'\n"
-    "📄 También podés enviarme un comprobante de pago en PDF.\n\n"
+    "📄 También podés enviarme un comprobante de pago en PDF o imagen.\n"
+    "↩️ Para cancelar el último movimiento: 'cancelar' o 'deshacer'\n\n"
     "¡Escribime tu primer movimiento!"
 )
 
-# ── PDF-specific error message ─────────────────────────────────
+# ── Document-specific error messages ───────────────────────────
 MSG_PDF_NO_ENTENDIDO = (
     "❌ Uy, no pude extraer los datos de este PDF.\n"
+    "Por ahora solo entiendo comprobantes de transferencia "
+    "de Mercado Pago.\n\n"
+    "Si querés, escribí el monto manualmente:\n"
+    "Ej: 'pagué 18000 en cine'"
+)
+
+MSG_IMAGE_NO_ENTENDIDO = (
+    "❌ Uy, no pude extraer los datos de esta imagen.\n"
     "Por ahora solo entiendo comprobantes de transferencia "
     "de Mercado Pago.\n\n"
     "Si querés, escribí el monto manualmente:\n"
@@ -52,6 +68,7 @@ async def process_incoming_message(
     phone: str,
     text: str,
     media_id: str | None = None,
+    media_type: str = "pdf",
 ) -> None:
     """
     Full orchestration flow for an incoming WhatsApp message.
@@ -65,16 +82,20 @@ async def process_incoming_message(
         The sender's phone number (international format).
     text : str
         The raw text message from the user. Empty string when
-        the message is a document/PDF.
+        the message is a document/image.
     media_id : str | None
-        If present, the Meta media ID for a PDF document
-        that needs to be downloaded and OCR'd.
+        If present, the Meta media ID for a PDF or image
+        that needs to be downloaded and processed.
+    media_type : str
+        Either "pdf" or "image". Determines which extraction
+        function is used for the media.
     """
     logger.info(
-        "Processing message from=%s text=%s media_id=%s",
+        "Processing message from=%s text=%s media_id=%s media_type=%s",
         phone,
-        text[:80] if text else "(pdf)",
+        text[:80] if text else "(media)",
         media_id or "N/A",
+        media_type,
     )
 
     try:
@@ -94,36 +115,59 @@ async def process_incoming_message(
                 logger.info("Onboarding message sent to new user phone=%s", phone)
                 return
 
-            # ── 2. Resolve texto_usuario from text or PDF ──────────
+            # ── 2. Resolve texto_usuario from text, PDF, or image ──
             texto_usuario: str = text
             es_documento: bool = bool(media_id)
 
             if media_id:
-                # ── 2a. PDF document path ──────────────────────────
-                await send_whatsapp_message(
-                    phone,
-                    "📄 Recibí tu comprobante, lo estoy analizando...",
-                )
-
-                try:
-                    pdf_bytes = await download_whatsapp_media(media_id)
-                    pdf_text = extract_text_from_pdf_bytes(pdf_bytes)
-                    texto_usuario = f"Comprobante de pago: {pdf_text}"
-                    logger.info(
-                        "PDF processed for phone=%s: %d chars extracted",
-                        phone,
-                        len(pdf_text),
-                    )
-                except ValueError as exc:
-                    # PDF with no extractable text (scan, image-based)
+                # ── 2a. Media document path (PDF or Image) ─────────
+                if media_type == "image":
                     await send_whatsapp_message(
                         phone,
-                        f"⚠️ No pude leer el PDF: {exc}\n"
-                        "Intentá enviar el comprobante como imagen o "
-                        "escribí el monto manualmente.",
+                        "📸 Recibí tu imagen, la estoy analizando...",
                     )
+                else:
+                    await send_whatsapp_message(
+                        phone,
+                        "📄 Recibí tu comprobante, lo estoy analizando...",
+                    )
+
+                try:
+                    media_bytes = await download_whatsapp_media(media_id)
+
+                    if media_type == "image":
+                        extracted_text = extract_text_from_image_bytes(
+                            media_bytes
+                        )
+                    else:
+                        extracted_text = extract_text_from_pdf_bytes(
+                            media_bytes
+                        )
+
+                    texto_usuario = (
+                        f"Comprobante de pago: {extracted_text}"
+                    )
+                    logger.info(
+                        "%s processed for phone=%s: %d chars extracted",
+                        media_type.upper(),
+                        phone,
+                        len(extracted_text),
+                    )
+                except ValueError as exc:
+                    # Document with no extractable text
+                    error_msg = (
+                        MSG_IMAGE_NO_ENTENDIDO
+                        if media_type == "image"
+                        else (
+                            f"⚠️ No pude leer el PDF: {exc}\n"
+                            "Intentá enviar el comprobante como imagen o "
+                            "escribí el monto manualmente."
+                        )
+                    )
+                    await send_whatsapp_message(phone, error_msg)
                     logger.warning(
-                        "PDF text extraction failed for phone=%s: %s",
+                        "%s text extraction failed for phone=%s: %s",
+                        media_type.upper(),
                         phone,
                         str(exc),
                     )
@@ -136,7 +180,8 @@ async def process_incoming_message(
                         "manualmente.",
                     )
                     logger.error(
-                        "PDF processing FAILED for phone=%s media_id=%s: %s",
+                        "%s processing FAILED for phone=%s media_id=%s: %s",
+                        media_type.upper(),
                         phone,
                         media_id,
                         str(exc),
@@ -161,7 +206,37 @@ async def process_incoming_message(
                 llm_result.get("proveedor_usado"),
             )
 
-            # ── 3b. Guard: reject unrecognised formats ──────────────
+            # ── 3b. Handle CANCELAR (undo last movement) ────────────
+            if llm_result["tipo"] == "CANCELAR":
+                logger.info(
+                    "Undo requested by phone=%s", phone
+                )
+                undo_result = await undo_last_movement(user.id, db)
+
+                frontend_url = f"{settings.FRONTEND_URL}/d/{user.public_id}"
+
+                if undo_result["status"] == "error":
+                    await send_whatsapp_message(
+                        phone,
+                        f"⚠️ {undo_result['message']}",
+                    )
+                else:
+                    tipo_label = (
+                        "ingreso" if undo_result["tipo"] == "INGRESO"
+                        else "gasto"
+                    )
+                    await send_whatsapp_message(
+                        phone,
+                        f"✅ ¡Listo! Cancelé tu último {tipo_label} "
+                        f"de '{undo_result['categoria']}' "
+                        f"por ${undo_result['monto']:,.2f}.\n"
+                        f"💰 Tu saldo vuelve a ser: "
+                        f"${undo_result['nuevo_saldo']:,.2f}\n"
+                        f"\n🔗 Tu panel: {frontend_url}",
+                    )
+                return
+
+            # ── 3c. Guard: reject unrecognised formats ──────────────
             if llm_result["tipo"] == "DESCONOCIDO":
                 logger.warning(
                     "Mensaje no reconocido de phone=%s es_documento=%s: '%s'",
@@ -170,8 +245,13 @@ async def process_incoming_message(
                     texto_usuario[:80],
                 )
                 if es_documento:
-                    # UX: PDF-specific error — don't show generic onboarding
-                    await send_whatsapp_message(phone, MSG_PDF_NO_ENTENDIDO)
+                    # UX: document-specific error message
+                    msg = (
+                        MSG_IMAGE_NO_ENTENDIDO
+                        if media_type == "image"
+                        else MSG_PDF_NO_ENTENDIDO
+                    )
+                    await send_whatsapp_message(phone, msg)
                 else:
                     await send_whatsapp_message(phone, MSG_AYUDA)
                 return

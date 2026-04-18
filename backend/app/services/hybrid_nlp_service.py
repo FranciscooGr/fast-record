@@ -5,12 +5,13 @@ All incoming messages are resolved deterministically with Python regex.
 No LLM provider is used; running costs are $0.
 
 Processing order:
-  0. Fast Path 0 — Mercado Pago PDF receipts   → EGRESO (comprobante)
-  1. Fast Path 1 — Balance / query keywords     → CONSULTA
-  2. Fast Path 2 — <monto> <categoría>          → EGRESO
-  3. Fast Path 3 — <verbo_gasto> <monto> <cat>  → EGRESO
-  4. Fast Path 4 — <verbo_ingreso> <monto>      → INGRESO
-  5. Default     — DESCONOCIDO (error determinista)
+  -1. Fast Path -1 — Cancel / undo keywords     → CANCELAR
+   0. Fast Path 0  — Mercado Pago PDF receipts   → EGRESO (comprobante)
+   1. Fast Path 1  — Balance / query keywords     → CONSULTA
+   2. Fast Path 2  — <monto> <categoría>          → EGRESO
+   3. Fast Path 3  — <verbo_gasto> <monto> <cat>  → EGRESO
+   4. Fast Path 4  — <verbo_ingreso> <monto>      → INGRESO
+   5. Default      — DESCONOCIDO (error determinista)
 """
 
 import logging
@@ -18,11 +19,39 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# ── Fast Path -1: Cancel / Undo intent ───────────────────────────
+# Exact keywords that immediately trigger cancellation
+_CANCEL_KEYWORDS: set[str] = {
+    "cancela",
+    "cancelar",
+    "deshacer",
+    "anular",
+    "me equivoque",
+    "me equivoqué",
+}
+
+# Phrase patterns: "borra el ultimo", "elimina el ultimo", etc.
+_RE_CANCEL_PHRASE = re.compile(
+    r"^(?:borra|elimina|quita|saca)(?:r?)\s+(?:el\s+)?(?:ultimo|último)$",
+    re.IGNORECASE,
+)
+
 # ── Fast Path 0: Mercado Pago PDF receipt detection ──────────────
 # MP PDFs produce doubled-letter artefacts: ttoottaall, ttííttuulloo
-# Monto pattern: $ 18.055,00  or  $18055,00  or  $ 1.200
-_RE_PDF_MONTO = re.compile(
-    r"\$\s*([\d.,]+)",
+#
+# STRICT monto pattern — Argentine canonical format only:
+#   $ 20.000,50  |  $ 20.000  |  $ 1.200,00  |  $ 500
+# Groups of 1-3 digits followed by .XXX blocks, with optional ,XX cents.
+# This intentionally REJECTS flat OCR garbage like "$2000000" where
+# superscript cents got flattened into the integer part.
+_RE_PDF_MONTO_STRICT = re.compile(
+    r"\$\s*(\d{1,3}(?:\.\d{3})*)(?:,(\d{2}))?"
+)
+
+# FALLBACK monto — loose capture for non-standard formats.
+# Only used when the strict regex finds nothing.
+_RE_PDF_MONTO_FALLBACK = re.compile(
+    r"\$\s*([\d.,]+)"
 )
 # Título pattern — handles MP doubled-letter artefact and normal text
 _RE_PDF_TITULO = re.compile(
@@ -156,6 +185,22 @@ def _parse_monto_ar(raw: str) -> float:
     return float(cleaned)
 
 
+def _parse_receipt_monto(match: re.Match) -> float:
+    """Parse a structured Argentine amount from the strict receipt regex.
+
+    Group 1: integer part with dots as thousands (e.g. "20.000")
+    Group 2: optional 2-digit cents after comma  (e.g. "50")
+
+    Examples:
+        match("$ 20.000")    → 20000.00
+        match("$ 18.055,50") → 18055.50
+        match("$ 500")       → 500.00
+    """
+    integer_part = match.group(1).replace(".", "")  # "20.000" → "20000"
+    cents = match.group(2) or "00"                   # "50" or default "00"
+    return float(f"{integer_part}.{cents}")
+
+
 def _normalizar_categoria(cat_raw: str | None) -> str:
     """Resolve a raw capture group into a canonical category.
 
@@ -197,10 +242,16 @@ def _build_result(
 
 
 def _try_parse_pdf_receipt(cleaned: str) -> dict | None:
-    """Try to parse a Mercado Pago PDF receipt from cleaned text.
+    """Try to parse a Mercado Pago PDF/image receipt from cleaned text.
+
+    Uses a two-pass strategy for amount extraction:
+      1. STRICT regex — only matches canonical Argentine format
+         (groups of .XXX thousands), immune to superscript-cent corruption.
+      2. FALLBACK regex — loose capture for edge cases, with a
+         suspicion warning if the amount looks inflated.
 
     Returns a result dict if successful, None if the text doesn't
-    match PDF receipt patterns.
+    match receipt patterns.
     """
     # Detection: must start with "comprobante de pago" OR contain "ttoottaall"
     is_comprobante = cleaned.startswith("comprobante de pago")
@@ -209,23 +260,57 @@ def _try_parse_pdf_receipt(cleaned: str) -> dict | None:
     if not (is_comprobante or has_total_marker):
         return None
 
-    logger.info("📄 [PDF RECEIPT] Comprobante de Mercado Pago detectado")
+    logger.info("📄 [RECEIPT] Comprobante de Mercado Pago detectado")
 
-    # ── Extract monto ────────────────────────────────────────────
-    monto_match = _RE_PDF_MONTO.search(cleaned)
-    if not monto_match:
-        logger.warning("📄 [PDF RECEIPT] No se encontró monto en el comprobante")
+    # ── Extract monto — strict regex first ───────────────────────
+    monto: float | None = None
+
+    strict_match = _RE_PDF_MONTO_STRICT.search(cleaned)
+    if strict_match:
+        try:
+            monto = _parse_receipt_monto(strict_match)
+            logger.info(
+                "📄 [RECEIPT] Monto extraído (regex estricta): $%.2f",
+                monto,
+            )
+        except (ValueError, IndexError) as exc:
+            logger.warning(
+                "📄 [RECEIPT] Error parseando monto estricto: %s", exc
+            )
+
+    # ── Fallback — loose regex if strict found nothing ───────────
+    if monto is None or monto <= 0:
+        fallback_match = _RE_PDF_MONTO_FALLBACK.search(cleaned)
+        if not fallback_match:
+            logger.warning(
+                "📄 [RECEIPT] No se encontró monto en el comprobante"
+            )
+            return None
+
+        try:
+            monto = _parse_monto_ar(fallback_match.group(1))
+            logger.warning(
+                "📄 [RECEIPT] Monto extraído por FALLBACK (posible "
+                "superíndice corrupto): $%.2f — revisar manualmente",
+                monto,
+            )
+        except (ValueError, IndexError) as exc:
+            logger.warning(
+                "📄 [RECEIPT] Error parseando monto fallback: %s", exc
+            )
+            return None
+
+    if monto is None or monto <= 0:
+        logger.warning("📄 [RECEIPT] Monto inválido: %s", monto)
         return None
 
-    try:
-        monto = _parse_monto_ar(monto_match.group(1))
-    except (ValueError, IndexError) as exc:
-        logger.warning("📄 [PDF RECEIPT] Error parseando monto: %s", exc)
-        return None
-
-    if monto <= 0:
-        logger.warning("📄 [PDF RECEIPT] Monto inválido: %.2f", monto)
-        return None
+    # ── Suspicion alert for inflated amounts ─────────────────────
+    if monto > 1_000_000:
+        logger.warning(
+            "⚠️ [RECEIPT] Monto sospechosamente alto: $%.2f — "
+            "posible corrupción por superíndice de centavos",
+            monto,
+        )
 
     # ── Extract categoría from título ────────────────────────────
     titulo_match = _RE_PDF_TITULO.search(cleaned)
@@ -233,16 +318,16 @@ def _try_parse_pdf_receipt(cleaned: str) -> dict | None:
         titulo_raw = titulo_match.group(1).strip()
         categoria = _normalizar_categoria(titulo_raw)
         logger.info(
-            "📄 [PDF RECEIPT] Título extraído: '%s' → categoría: '%s'",
+            "📄 [RECEIPT] Título extraído: '%s' → categoría: '%s'",
             titulo_raw,
             categoria,
         )
     else:
         categoria = "Comprobante MP"
-        logger.info("📄 [PDF RECEIPT] Sin título, usando categoría default")
+        logger.info("📄 [RECEIPT] Sin título, usando categoría default")
 
     logger.info(
-        "📄 [PDF RECEIPT] Costo $0 - Egreso detectado: monto=%.2f categoria='%s'",
+        "📄 [RECEIPT] Costo $0 - Egreso detectado: monto=%.2f categoria='%s'",
         monto,
         categoria,
     )
@@ -273,6 +358,21 @@ async def analyze_hybrid_message(texto: str) -> dict:
     """
     cleaned = texto.strip().lower()
     logger.info("hybrid_nlp: cleaned input='%s'", cleaned)
+
+    # ── Fast Path -1 — Cancel / Undo ─────────────────────────────
+    if cleaned in _CANCEL_KEYWORDS or _RE_CANCEL_PHRASE.match(cleaned):
+        logger.info(
+            "↩️ [FAST PATH LOCAL] Intención de cancelación detectada: '%s'",
+            cleaned,
+        )
+        return _build_result(
+            tipo="CANCELAR",
+            monto=0.0,
+            categoria="Sistema",
+            nota="cancelar_ultimo",
+            proveedor_usado="regex_local",
+            confianza=1.0,
+        )
 
     # ── Fast Path 0 — Mercado Pago PDF receipt ──────────────────
     pdf_result = _try_parse_pdf_receipt(cleaned)
