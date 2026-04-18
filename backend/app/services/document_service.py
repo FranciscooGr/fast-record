@@ -1,10 +1,10 @@
 """
-PDF Service — extract text content from PDF payment receipts.
+Document Service — extract text from PDF and image payment receipts.
 
-Uses pdfplumber to parse PDF bytes in memory (no disk I/O required).
-Designed to process WhatsApp-forwarded payment receipts
-(e.g. Mercado Pago transfers) and return clean text suitable
-for the NLP pipeline.
+- PDF:   uses pdfplumber to parse bytes in memory.
+- Image: uses Pillow + pytesseract (Tesseract OCR) for text recognition.
+
+Both functions return clean text suitable for the NLP pipeline.
 """
 
 import io
@@ -12,8 +12,13 @@ import logging
 import re
 
 import pdfplumber
+import pytesseract
+from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+
+# ─── PDF extraction ─────────────────────────────────────────────
 
 
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
@@ -82,6 +87,67 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     except Exception as exc:
         logger.error(
             "Failed to extract text from PDF: %s",
+            str(exc),
+            exc_info=True,
+        )
+        raise
+
+
+# ─── Image OCR extraction ───────────────────────────────────────
+
+
+def extract_text_from_image_bytes(image_bytes: bytes) -> str:
+    """
+    Extract text from an image via Tesseract OCR.
+
+    Parameters
+    ----------
+    image_bytes : bytes
+        Raw bytes of the image file (JPEG, PNG, WEBP, etc.).
+
+    Returns
+    -------
+    str
+        Cleaned text recognised from the image.
+
+    Raises
+    ------
+    ValueError
+        If no recognisable text is found in the image.
+    Exception
+        Re-raises PIL / Tesseract errors after logging.
+    """
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        logger.info(
+            "Image opened for OCR: format=%s size=%s mode=%s",
+            image.format,
+            image.size,
+            image.mode,
+        )
+
+        # Use Spanish language pack for better accuracy with AR receipts
+        text = pytesseract.image_to_string(image, lang="spa")
+
+        clean = re.sub(r"\n{3,}", "\n\n", text).strip()
+        if not clean:
+            logger.warning("OCR produced no text from image")
+            raise ValueError(
+                "La imagen no contiene texto reconocible."
+            )
+
+        logger.info(
+            "Image OCR complete: %d chars extracted",
+            len(clean),
+        )
+        return clean
+
+    except ValueError:
+        raise  # re-raise our own ValueError
+
+    except Exception as exc:
+        logger.error(
+            "Failed to extract text from image: %s",
             str(exc),
             exc_info=True,
         )

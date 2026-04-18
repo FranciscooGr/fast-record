@@ -117,7 +117,7 @@ async def calcular_saldo(usuario_id: int, db: AsyncSession) -> dict:
     result_egr = await db.execute(stmt_egresos)
     egresos_total = float(result_egr.scalar_one())
 
-    saldo = ingresos_total - egresos_total
+    saldo = max(0.0, ingresos_total - egresos_total)
 
     logger.info(
         "Balance for user=%d: ingresos=%.2f egresos=%.2f saldo=%.2f",
@@ -131,6 +131,85 @@ async def calcular_saldo(usuario_id: int, db: AsyncSession) -> dict:
         "ingresos_total": ingresos_total,
         "egresos_total": egresos_total,
         "saldo": saldo,
+    }
+
+
+async def undo_last_movement(
+    usuario_id: int,
+    db: AsyncSession,
+) -> dict:
+    """
+    Delete the most recent movement for a user and return undo details.
+
+    The balance is recalculated dynamically after deletion — no stored
+    column is ever modified.
+
+    Parameters
+    ----------
+    usuario_id : int
+        The user whose last movement to undo.
+    db : AsyncSession
+        The async SQLAlchemy session.
+
+    Returns
+    -------
+    dict
+        On success:
+            {"status": "success", "tipo": str, "monto": float,
+             "categoria": str, "nuevo_saldo": float}
+        On failure (no movements):
+            {"status": "error", "message": str}
+    """
+    # ── Find the latest movement ────────────────────────────────
+    stmt = (
+        select(Movement)
+        .where(Movement.usuario_id == usuario_id)
+        .order_by(Movement.fecha.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    last_movement = result.scalar_one_or_none()
+
+    if last_movement is None:
+        logger.info(
+            "Undo requested but user=%d has no movements", usuario_id
+        )
+        return {
+            "status": "error",
+            "message": "No tenés movimientos para cancelar.",
+        }
+
+    # ── Capture info before deletion ────────────────────────────
+    tipo = last_movement.tipo.value          # "INGRESO" or "EGRESO"
+    monto = float(last_movement.monto)
+    categoria = last_movement.categoria
+    movement_id = last_movement.id
+
+    # ── Delete the movement ─────────────────────────────────────
+    await db.delete(last_movement)
+    await db.commit()
+
+    logger.info(
+        "Undo: deleted movement id=%d user=%d tipo=%s monto=%.2f cat=%s",
+        movement_id,
+        usuario_id,
+        tipo,
+        monto,
+        categoria,
+    )
+
+    # ── Recalculate balance dynamically ─────────────────────────
+    saldo_data = await calcular_saldo(usuario_id, db)
+
+    # ── Notify connected dashboard clients ──────────────────────
+    await manager.broadcast(usuario_id, "update_dashboard")
+
+    return {
+        "status": "success",
+        "tipo": tipo,
+        "monto": monto,
+        "categoria": categoria,
+        "nuevo_saldo": saldo_data["saldo"],
     }
 
 
