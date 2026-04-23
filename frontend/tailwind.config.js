@@ -19,6 +19,15 @@ export default {
           800: '#0b3d0b', 
           900: '#052405', 
         },
+        chart: {
+          1: '#1e6e1e', // Tu verde base (para que combine con la app)
+          2: '#1d4ed8', // Azul profundo (ej: Ingresos)
+          3: '#b91c1c', // Rojo carmín (ej: Gastos fijos)
+          4: '#b45309', // Naranja oscuro (ej: Gastos variables)
+          5: '#6d28d9', // Violeta profundo (ej: Inversiones)
+          6: '#0f766e', // Verde azulado (ej: Ocio)
+          7: '#be185d', // Magenta (ej: Otros)
+        },
         surface: {
           DEFAULT: '#f4f7f4',
           card:    '#ffffff',

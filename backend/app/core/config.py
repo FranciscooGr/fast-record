@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # ── Frontend ────────────────────────────────────────────────
     FRONTEND_URL: str = "https://fast-record.vercel.app"
+    #FRONTEND_URL: str = "http://localhost:5173/"
 
     model_config = {
         "env_file": ".env",

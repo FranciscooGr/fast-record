@@ -50,6 +50,22 @@ interface DashboardData {
 type Periodo = 'day' | 'month' | 'year';
 
 /* ═══════════════════════════════════════════════════════════════
+   Colores del gráfico de torta — tomados de tailwind.config.js
+   (theme.extend.colors.chart)
+   Para cambiar los colores del Pie Chart, modificá este array
+   manteniendo sincronización con tailwind.config.js → chart.1‑7
+   ═══════════════════════════════════════════════════════════════ */
+const CHART_COLORS = [
+  '#1e6e1e', // chart-1 → Verde base (combina con la app)
+  '#1d4ed8', // chart-2 → Azul profundo
+  '#b91c1c', // chart-3 → Rojo carmín
+  '#b45309', // chart-4 → Naranja oscuro
+  '#6d28d9', // chart-5 → Violeta profundo
+  '#0f766e', // chart-6 → Verde azulado
+  '#be185d', // chart-7 → Magenta
+];
+
+/* ═══════════════════════════════════════════════════════════════
    Date helpers (plain JS — no external deps)
    ═══════════════════════════════════════════════════════════════ */
 
@@ -423,8 +439,11 @@ export default function Dashboard() {
                     dataKey="value"
                     cornerRadius={4}
                   >
-                    {gastos_por_categoria.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    {/* 🎨 COLORES PIE CHART: cada slice usa CHART_COLORS
+                        definido arriba (sincronizado con tailwind chart.1-7).
+                        Se cicla con módulo para soportar más de 7 categorías. */}
+                    {gastos_por_categoria.map((_entry, index) => (
+                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                     ))}
                   </Pie>
                 </PieChart>
@@ -450,9 +469,10 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 mt-6 pt-6 border-t border-surface-muted/60">
             {gastos_por_categoria.map((item, idx) => (
               <div key={idx} className="flex items-center gap-2">
+                {/* 🎨 COLORES LEYENDA: mismo CHART_COLORS que el Pie */}
                 <div
                   className="w-3 h-3 rounded-md flex-shrink-0"
-                  style={{ backgroundColor: item.color }}
+                  style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }}
                 />
                 <span className="text-xs text-ink-muted font-medium">{item.name}</span>
                 <span className="text-xs md:text-sm font-bold text-ink whitespace-nowrap">
