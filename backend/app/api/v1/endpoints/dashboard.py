@@ -15,7 +15,7 @@ are scoped to the provided date window.
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from sqlalchemy import select, func
+from sqlalchemy import select, func, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_db
@@ -146,6 +146,38 @@ async def get_dashboard_summary(
         for idx, r in enumerate(result_cat.all())
     ]
 
+    # 4. Highest individual expense per category (window function)
+    #    CTE: rank each expense within its category by monto DESC,
+    #    then pick row_num = 1 for each category.
+    ranked_cte = (
+        select(
+            Movement.categoria,
+            Movement.monto,
+            Movement.nota,
+            func.row_number()
+            .over(partition_by=Movement.categoria, order_by=Movement.monto.desc())
+            .label("rn"),
+        )
+        .where(*base_filter, Movement.tipo == TipoMovimiento.EGRESO)
+        .cte("ranked_expenses")
+    )
+
+    stmt_top = select(
+        ranked_cte.c.categoria,
+        ranked_cte.c.monto,
+        ranked_cte.c.nota,
+    ).where(ranked_cte.c.rn == 1)
+
+    result_top = await db.execute(stmt_top)
+    mayor_gasto_por_categoria = [
+        {
+            "categoria": r.categoria,
+            "monto": float(r.monto),
+            "nota": r.nota or r.categoria,
+        }
+        for r in result_top.all()
+    ]
+
     return {
         "saldo_historico_global": saldo_historico_global,
         "saldo_periodo": saldo_periodo,
@@ -153,6 +185,7 @@ async def get_dashboard_summary(
         "egresos_totales": egresos,
         "movimientos_recientes": movimientos_recientes,
         "gastos_por_categoria": gastos_por_categoria,
+        "mayor_gasto_por_categoria": mayor_gasto_por_categoria,
         "periodo": {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
