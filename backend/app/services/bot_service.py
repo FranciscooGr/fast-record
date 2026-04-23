@@ -277,8 +277,14 @@ async def process_incoming_message(
             saldo = saldo_data["saldo"]
 
             # ── 6. Build clean dashboard URL with public_id ────────
+            # produccion: 
             frontend_url = f"{settings.FRONTEND_URL}/d/{user.public_id}"
 
+            # Le sacamos la barra final a la variable de entorno por si la tiene
+            #Test:
+            #base_url = settings.FRONTEND_URL.rstrip("/")
+            #frontend_url = f"{base_url}/d/{user.public_id}"
+                
             # ── 7. Compose and send WhatsApp response ──────────────
             if tipo == "CONSULTA":
                 mensaje = (

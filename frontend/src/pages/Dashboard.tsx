@@ -9,6 +9,7 @@ import {
   ArrowDownRight,
   ChevronLeft,
   ChevronRight,
+  Trophy,
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════
@@ -29,6 +30,12 @@ interface CategoryExpense {
   color: string;
 }
 
+interface TopExpense {
+  categoria: string;
+  monto: number;
+  nota: string;
+}
+
 interface DashboardData {
   saldo_historico_global: number;
   saldo_periodo: number;
@@ -36,6 +43,7 @@ interface DashboardData {
   egresos_totales: number;
   movimientos_recientes: Movement[];
   gastos_por_categoria: CategoryExpense[];
+  mayor_gasto_por_categoria: TopExpense[];
   periodo: { start_date: string; end_date: string };
 }
 
@@ -291,11 +299,12 @@ export default function Dashboard() {
     ingresos_totales: 0,
     egresos_totales: 0,
     gastos_por_categoria: [],
+    mayor_gasto_por_categoria: [],
     movimientos_recientes: [],
     periodo: { start_date: '', end_date: '' },
   };
 
-  const { saldo_historico_global, saldo_periodo, gastos_por_categoria, movimientos_recientes } = safeData;
+  const { saldo_historico_global, saldo_periodo, gastos_por_categoria, mayor_gasto_por_categoria, movimientos_recientes } = safeData;
 
   /* ── Tab config ────────────────────────────────────────────── */
   const TABS: { key: Periodo; label: string }[] = [
@@ -438,21 +447,60 @@ export default function Dashboard() {
           </div>
 
           {/* Legend */}
-          <div className="grid grid-cols-2 gap-y-4 gap-x-6 mt-6 pt-6 border-t border-surface-muted/60">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 mt-6 pt-6 border-t border-surface-muted/60">
             {gastos_por_categoria.map((item, idx) => (
               <div key={idx} className="flex items-center gap-2">
                 <div
                   className="w-3 h-3 rounded-md flex-shrink-0"
                   style={{ backgroundColor: item.color }}
                 />
-                <div className="flex items-center gap-1.5 truncate">
-                  <span className="text-xs text-ink-muted font-medium truncate">{item.name}</span>
-                  <span className="text-xs font-bold text-ink truncate">${Math.round(item.value)}</span>
-                </div>
+                <span className="text-xs text-ink-muted font-medium">{item.name}</span>
+                <span className="text-xs md:text-sm font-bold text-ink whitespace-nowrap">
+                  ${Math.round(item.value).toLocaleString()}
+                </span>
               </div>
             ))}
           </div>
         </section>
+
+        {/* ══════ TOP EXPENSE PER CATEGORY ═════════════════════════ */}
+        {mayor_gasto_por_categoria.length > 0 && (
+          <section id="top-expenses" className="bg-white rounded-[2rem] p-6 shadow-card border border-brand-50/50">
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="w-9 h-9 bg-brand-50 rounded-xl flex items-center justify-center text-brand-600">
+                <Trophy size={18} strokeWidth={2.5} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-ink leading-tight">Mayores Gastos</h2>
+                <p className="text-xs font-medium text-ink-muted">El gasto más alto por categoría</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {mayor_gasto_por_categoria
+                .sort((a, b) => b.monto - a.monto)
+                .map((item) => (
+                  <div
+                    key={item.categoria}
+                    className="group flex items-center gap-3.5 p-4 rounded-2xl bg-surface-muted/40 border border-transparent hover:border-brand-100 hover:bg-brand-50/30 transition-all duration-200"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-white border border-surface-muted flex items-center justify-center text-ink-muted group-hover:border-brand-200 group-hover:text-brand-600 transition-colors">
+                      <ArrowDownRight size={18} strokeWidth={2.5} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider truncate">
+                        {item.categoria}
+                      </p>
+                      <p className="text-sm font-extrabold text-ink truncate">
+                        {formatCurrency(item.monto)}
+                        <span className="text-xs font-medium text-ink-muted ml-1.5">({item.nota})</span>
+                      </p>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
 
         {/* ══════ RECENT ACTIVITY ════════════════════════════════ */}
         <section className="bg-white rounded-[2rem] p-6 shadow-card border border-brand-50/50">
@@ -463,22 +511,25 @@ export default function Dashboard() {
             </button>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-4">
             {movimientos_recientes.map((tx) => (
-              <div key={tx.id} className="flex items-center justify-between group cursor-pointer">
-                <div className="flex items-center gap-4 flex-1">
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition border ${tx.tipo === 'INGRESO'
-                    ? 'bg-brand-50 text-brand-600 border-brand-100'
-                    : 'bg-surface text-ink-muted border-transparent group-hover:border-surface-muted'
-                    }`}>
-                    {tx.tipo === 'INGRESO' ? <ArrowUpRight size={20} className="text-brand-600" /> : <ArrowDownRight size={20} className="text-red-500" />}
-                  </div>
-                  <div className="flex-1 min-w-0 pr-4">
-                    <p className="text-sm font-bold text-ink line-clamp-1 mb-0.5">{tx.name}</p>
-                    <p className="text-[11px] font-medium text-ink-muted truncate">{tx.category} • {formatTimeAgo(tx.fecha)}</p>
-                  </div>
+              <div key={tx.id} className="grid grid-cols-[auto_1fr_auto] gap-x-4 items-center group cursor-pointer">
+                {/* Icon */}
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition border ${tx.tipo === 'INGRESO'
+                  ? 'bg-brand-50 text-brand-600 border-brand-100'
+                  : 'bg-surface text-ink-muted border-transparent group-hover:border-surface-muted'
+                  }`}>
+                  {tx.tipo === 'INGRESO' ? <ArrowUpRight size={18} className="text-brand-600" /> : <ArrowDownRight size={18} className="text-red-500" />}
                 </div>
-                <span className={`text-sm font-extrabold whitespace-nowrap pl-2 ${tx.tipo === 'INGRESO' ? 'text-brand-600' : 'text-ink'}`}>
+
+                {/* Description */}
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-ink line-clamp-1 mb-0.5">{tx.name}</p>
+                  <p className="text-[11px] font-medium text-ink-muted truncate">{tx.category} • {formatTimeAgo(tx.fecha)}</p>
+                </div>
+
+                {/* Amount — fixed column, left-aligned */}
+                <span className={`text-sm font-extrabold whitespace-nowrap tabular-nums ${tx.tipo === 'INGRESO' ? 'text-brand-600' : 'text-ink'}`}>
                   {tx.tipo === 'INGRESO' ? '+' : '-'}{formatCurrency(Math.abs(tx.amount))}
                 </span>
               </div>

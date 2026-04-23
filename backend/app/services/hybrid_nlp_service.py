@@ -103,7 +103,7 @@ _MAPEO_CATEGORIAS: dict[str, str] = {
     "doctor": "Salud",
     "obra social": "Salud",
     # Salidas / Entretenimiento
-    "chupi": "Salidas",
+    "fiesta": "Salidas",
     "birra": "Salidas",
     "cerveza": "Salidas",
     "bar": "Salidas",
@@ -121,6 +121,36 @@ _MAPEO_CATEGORIAS: dict[str, str] = {
     "delivery": "Comida",
     "rappi": "Comida",
     "pedidosya": "Comida",
+    "pizza": "Comida",
+    "helado": "Comida",
+    "empanadas": "Comida",
+    "hamburguesa": "Comida",
+    "lomo": "Comida",
+    "kiosco": "Comida",
+    "kiosko": "Comida",
+    "panaderia": "Comida",
+    "panadería": "Comida",
+    "carniceria": "Comida",
+    "carnicería": "Comida",
+    "verduleria": "Comida",
+    "verdulería": "Comida",
+    "cafe": "Comida",
+    "café": "Comida",
+    "desayuno": "Comida",
+    "merienda": "Comida",
+    "sushi": "Comida",
+    "asado": "Comida",
+    "milanesa": "Comida",
+    "milanesas": "Comida",
+    "rotiseria": "Comida",
+    "rotisería": "Comida",
+    "fiambreria": "Comida",
+    "fiambrería": "Comida",
+    "heladeria": "Comida",
+    "heladería": "Comida",
+    "mcdonalds": "Comida",
+    "burger king": "Comida",
+    "mostaza": "Comida",
     # Servicios
     "luz": "Servicios",
     "gas": "Servicios",
@@ -357,6 +387,12 @@ async def analyze_hybrid_message(texto: str) -> dict:
         A dict with keys: tipo, monto, categoria, nota, proveedor_usado, confianza.
     """
     cleaned = texto.strip().lower()
+
+    # ── Pre-procesamiento: multiplicadores informales ─────────────
+    # Reemplazar "mil" o "k" por "000" (ej: "13 mil" → "13000", "5k" → "5000")
+    cleaned = re.sub(r'(?<=\d)\s*mil\b', '000', cleaned)
+    cleaned = re.sub(r'(?<=\d)\s*k\b', '000', cleaned)
+
     logger.info("hybrid_nlp: cleaned input='%s'", cleaned)
 
     # ── Fast Path -1 — Cancel / Undo ─────────────────────────────
