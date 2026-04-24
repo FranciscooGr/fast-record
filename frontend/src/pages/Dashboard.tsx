@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Trophy,
+  Menu,
+  LogOut
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════
@@ -51,12 +53,9 @@ type Periodo = 'day' | 'month' | 'year';
 
 /* ═══════════════════════════════════════════════════════════════
    Colores del gráfico de torta — tomados de tailwind.config.js
-   (theme.extend.colors.chart)
-   Para cambiar los colores del Pie Chart, modificá este array
-   manteniendo sincronización con tailwind.config.js → chart.1‑7
    ═══════════════════════════════════════════════════════════════ */
 const CHART_COLORS = [
-  '#1e6e1e', // chart-1 → Verde base (combina con la app)
+  '#1e6e1e', // chart-1 → Verde base
   '#1d4ed8', // chart-2 → Azul profundo
   '#b91c1c', // chart-3 → Rojo carmín
   '#b45309', // chart-4 → Naranja oscuro
@@ -66,10 +65,8 @@ const CHART_COLORS = [
 ];
 
 /* ═══════════════════════════════════════════════════════════════
-   Date helpers (plain JS — no external deps)
+   Date helpers
    ═══════════════════════════════════════════════════════════════ */
-
-/** Format a Date as YYYY-MM-DD (ISO date only). */
 function toISODate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -77,18 +74,16 @@ function toISODate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Return [startDate, endDate] for the given period + reference date. */
 function getDateRange(periodo: Periodo, ref: Date): [string, string] {
   const year = ref.getFullYear();
   const month = ref.getMonth();
-
 
   switch (periodo) {
     case 'day':
       return [toISODate(ref), toISODate(ref)];
     case 'month': {
       const start = new Date(year, month, 1);
-      const end = new Date(year, month + 1, 0); // last day of month
+      const end = new Date(year, month + 1, 0);
       return [toISODate(start), toISODate(end)];
     }
     case 'year': {
@@ -104,7 +99,6 @@ function getDateRange(periodo: Periodo, ref: Date): [string, string] {
   }
 }
 
-/** Shift the reference date by ±1 unit based on the active period. */
 function shiftDate(ref: Date, periodo: Periodo, direction: -1 | 1): Date {
   const d = new Date(ref);
   switch (periodo) {
@@ -121,7 +115,6 @@ function shiftDate(ref: Date, periodo: Periodo, direction: -1 | 1): Date {
   return d;
 }
 
-/** Human-readable label for the current period. */
 const MONTHS_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
@@ -148,13 +141,16 @@ function getPeriodLabel(periodo: Periodo, ref: Date): string {
 export default function Dashboard() {
   const { publicId } = useParams<{ publicId: string }>();
 
+  // ── Estados ──────────────────────────────────────────────────
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Period filter state ─────────────────────────────────────
   const [periodo, setPeriodo] = useState<Periodo>('month');
   const [fechaReferencia, setFechaReferencia] = useState<Date>(new Date());
+
+  // ✅ ESTADO DEL MENÚ (Ubicado correctamente antes de los returns tempranos)
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // ── Fetch dashboard data ────────────────────────────────────
   const fetchDashboard = useCallback(async () => {
@@ -167,7 +163,6 @@ export default function Dashboard() {
 
     try {
       const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-
       const res = await fetch(
         `${API_URL}/api/v1/dashboard/summary?public_id=${publicId}&start_date=${startDate}&end_date=${endDate}`
       );
@@ -210,13 +205,12 @@ export default function Dashboard() {
 
     ws.onmessage = (event) => {
       if (event.data === 'update_dashboard') {
-        // Silent re-fetch without showing the loading spinner
         fetchDashboard();
       }
     };
 
     ws.onerror = () => {
-      // Non-critical; the dashboard still works via manual refresh
+      // Non-critical
     };
 
     return () => {
@@ -226,8 +220,6 @@ export default function Dashboard() {
   }, [publicId, fetchDashboard]);
 
   // ── Handlers ────────────────────────────────────────────────
-
-  /** True when the active period already contains today (can't go forward). */
   const isAtPresent = (() => {
     const now = new Date();
     switch (periodo) {
@@ -251,7 +243,7 @@ export default function Dashboard() {
 
   const handlePeriodoChange = (p: Periodo) => {
     setPeriodo(p);
-    setFechaReferencia(new Date()); // reset to today when switching tabs
+    setFechaReferencia(new Date());
   };
 
   const handleResetData = async () => {
@@ -260,17 +252,21 @@ export default function Dashboard() {
 
     try {
       const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-
       const res = await fetch(`${API_URL}/api/v1/movimientos/reset?public_id=${publicId}`, {
         method: 'DELETE',
       });
 
       if (!res.ok) throw new Error('Error al resetear la cuenta');
-
-      // Re-fetch the dashboard to reflect the empty state
       fetchDashboard();
     } catch (err) {
       alert('No se pudo resetear la cuenta. Intentá de nuevo.');
+    }
+  };
+
+  const handleLogout = () => {
+    if (window.confirm('¿Estás seguro de que deseas cerrar sesión?')) {
+      console.log("Cerrando sesión...");
+      setIsMenuOpen(false);
     }
   };
 
@@ -322,7 +318,6 @@ export default function Dashboard() {
 
   const { saldo_historico_global, saldo_periodo, gastos_por_categoria, mayor_gasto_por_categoria, movimientos_recientes } = safeData;
 
-  /* ── Tab config ────────────────────────────────────────────── */
   const TABS: { key: Periodo; label: string }[] = [
     { key: 'day', label: 'Día' },
     { key: 'month', label: 'Mes' },
@@ -337,7 +332,9 @@ export default function Dashboard() {
 
       {/* HEADER */}
       <header className="bg-white px-5 pt-8 pb-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] sticky top-0 z-20 rounded-b-3xl mb-6">
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex justify-between items-center mb-8 relative">
+
+          {/* Lado Izquierdo: Logo y Título */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center text-white font-bold text-sm shadow-md">
               <ShoppingBag size={20} strokeWidth={2.5} />
@@ -346,6 +343,55 @@ export default function Dashboard() {
               <h1 className="font-bold text-ink leading-tight text-lg">Fast Record</h1>
               <p className="text-[10px] uppercase font-bold tracking-widest text-ink-muted">Management</p>
             </div>
+          </div>
+
+          {/* Lado Derecho: Menú Hamburguesa */}
+          <div>
+            <button
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className="w-10 h-10 flex items-center justify-center rounded-xl bg-surface-muted text-ink-muted hover:text-ink hover:bg-brand-50 transition-colors active:scale-95"
+            >
+              <Menu size={22} strokeWidth={2.5} />
+            </button>
+
+            {/* Dropdown del Menú */}
+            {isMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setIsMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-12 mt-2 w-56 bg-white rounded-2xl shadow-card border border-brand-50/50 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <button
+                    onClick={() => {
+                      handleLogout();
+                      setIsMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-3 text-sm font-semibold text-ink-muted hover:text-ink hover:bg-surface-muted rounded-xl transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center">
+                      <LogOut size={16} strokeWidth={2.5} />
+                    </div>
+                    Cerrar Sesión
+                  </button>
+
+                  <div className="h-px bg-surface-muted/60 my-1 mx-2" />
+
+                  <button
+                    onClick={() => {
+                      handleResetData();
+                      setIsMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-3 text-sm font-semibold text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center">
+                      <Trash2 size={16} strokeWidth={2.5} />
+                    </div>
+                    Resetear Cuenta
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -416,111 +462,135 @@ export default function Dashboard() {
         </section>
 
         {/* ══════ PIE CHART ══════════════════════════════════════ */}
-        <section className="bg-white rounded-[2rem] p-6 shadow-card border border-brand-50/50 relative overflow-hidden">
-          <div className="flex justify-between items-center mb-2">
-            <div>
-              <h2 className="text-lg font-bold text-ink">Distribución de gastos</h2>
-              <p className="text-xs font-medium text-ink-muted">Por categoría en el período</p>
-            </div>
-          </div>
+        {/* ══════ CONTENEDOR 70/30 (Escritorio) / 100% (Móvil) ═════════ */}
+        <div className="flex flex-col lg:flex-row gap-6">
 
-          <div className="h-64 relative mt-4">
-            {gastos_por_categoria.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={gastos_por_categoria}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius="65%"
-                    outerRadius="95%"
-                    paddingAngle={3}
-                    stroke="none"
-                    dataKey="value"
-                    cornerRadius={4}
-                  >
-                    {/* 🎨 COLORES PIE CHART: cada slice usa CHART_COLORS
-                        definido arriba (sincronizado con tailwind chart.1-7).
-                        Se cicla con módulo para soportar más de 7 categorías. */}
-                    {gastos_por_categoria.map((_entry, index) => (
-                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="w-full h-full flex justify-center items-center">
-                <div className="w-56 h-56 rounded-full border-[1.25rem] border-surface-muted/40"></div>
+          {/* ══════ PIE CHART (70%) ══════════════════════════════════════ */}
+          {/* Se le asigna lg:w-[70%] solo si hay gastos al lado, si no, toma todo el ancho */}
+          <section className={`bg-white rounded-[2rem] p-6 shadow-card border border-brand-50/50 relative overflow-hidden w-full ${mayor_gasto_por_categoria.length > 0 ? 'lg:w-[70%]' : ''}`}>
+            <div className="flex justify-between items-center mb-2">
+              <div>
+                <h2 className="text-lg font-bold text-ink">Distribución de gastos</h2>
+                <p className="text-xs font-medium text-ink-muted">Por categoría en el período</p>
               </div>
-            )}
-
-            {/* Center label */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-1">
-              <span className="text-sm font-semibold text-ink-muted text-center leading-tight mb-1">
-                Saldo del Período
-              </span>
-              <span className="text-xl font-extrabold text-ink tracking-tight bg-white px-2 rounded-lg">
-                {formatCurrency(saldo_periodo)}
-              </span>
             </div>
-          </div>
 
-          {/* Legend */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 mt-6 pt-6 border-t border-surface-muted/60">
-            {gastos_por_categoria.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                {/* 🎨 COLORES LEYENDA: mismo CHART_COLORS que el Pie */}
-                <div
-                  className="w-3 h-3 rounded-md flex-shrink-0"
-                  style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }}
-                />
-                <span className="text-xs text-ink-muted font-medium">{item.name}</span>
-                <span className="text-xs md:text-sm font-bold text-ink whitespace-nowrap">
-                  ${Math.round(item.value).toLocaleString()}
+            <div className="h-64 relative mt-4">
+              {gastos_por_categoria.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={gastos_por_categoria}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="65%"
+                      outerRadius="95%"
+                      paddingAngle={3}
+                      stroke="none"
+                      dataKey="value"
+                      cornerRadius={4}
+                    >
+                      {gastos_por_categoria.map((_entry, index) => (
+                        <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="w-full h-full flex justify-center items-center">
+                  <div className="w-56 h-56 rounded-full border-[1.25rem] border-surface-muted/40"></div>
+                </div>
+              )}
+
+              {/* Center label */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-1">
+                <span className="text-sm font-semibold text-ink-muted text-center leading-tight mb-1">
+                  Saldo del Período
+                </span>
+                <span className="text-xl font-extrabold text-ink tracking-tight bg-white px-2 rounded-lg">
+                  {formatCurrency(saldo_periodo)}
                 </span>
               </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ══════ TOP EXPENSE PER CATEGORY ═════════════════════════ */}
-        {mayor_gasto_por_categoria.length > 0 && (
-          <section id="top-expenses" className="bg-white rounded-[2rem] p-6 shadow-card border border-brand-50/50">
-            <div className="flex items-center gap-2.5 mb-5">
-              <div className="w-9 h-9 bg-brand-50 rounded-xl flex items-center justify-center text-brand-600">
-                <Trophy size={18} strokeWidth={2.5} />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-ink leading-tight">Mayores Gastos</h2>
-                <p className="text-xs font-medium text-ink-muted">El gasto más alto por categoría</p>
-              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {mayor_gasto_por_categoria
-                .sort((a, b) => b.monto - a.monto)
-                .map((item) => (
+            {/* Legend */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 mt-6 pt-6 border-t border-surface-muted/60">
+              {gastos_por_categoria.map((item, idx) => (
+                <div key={idx} className="flex items-center gap-2">
                   <div
-                    key={item.categoria}
-                    className="group flex items-center gap-3.5 p-4 rounded-2xl bg-surface-muted/40 border border-transparent hover:border-brand-100 hover:bg-brand-50/30 transition-all duration-200"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-white border border-surface-muted flex items-center justify-center text-ink-muted group-hover:border-brand-200 group-hover:text-brand-600 transition-colors">
-                      <ArrowDownRight size={18} strokeWidth={2.5} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider truncate">
-                        {item.categoria}
-                      </p>
-                      <p className="text-sm font-extrabold text-ink truncate">
-                        {formatCurrency(item.monto)}
-                        <span className="text-xs font-medium text-ink-muted ml-1.5">({item.nota})</span>
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                    className="w-3 h-3 rounded-md flex-shrink-0"
+                    style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }}
+                  />
+                  <span className="text-xs text-ink-muted font-medium">{item.name}</span>
+                  <span className="text-xs md:text-sm font-bold text-ink whitespace-nowrap">
+                    ${Math.round(item.value).toLocaleString()}
+                  </span>
+                </div>
+              ))}
             </div>
           </section>
-        )}
+
+          {/* ══════ TOP EXPENSE PER CATEGORY (30%) ═════════════════════════ */}
+          {/* ══════ TOP EXPENSE PER CATEGORY (30%) ═════════════════════════ */}
+          {mayor_gasto_por_categoria.length > 0 && (
+            <section id="top-expenses" className="bg-white rounded-[2rem] p-6 shadow-card border border-brand-50/50 w-full lg:w-[30%] flex flex-col">
+              <div className="flex items-center gap-2.5 mb-5">
+                <div className="w-9 h-9 bg-brand-50 rounded-xl flex items-center justify-center text-brand-600">
+                  <Trophy size={18} strokeWidth={2.5} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-ink leading-tight">Mayores Gastos</h2>
+                  <p className="text-xs font-medium text-ink-muted">El gasto más alto</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-3 flex-1 overflow-y-auto pr-1">
+                {mayor_gasto_por_categoria
+                  .sort((a, b) => b.monto - a.monto)
+                  .map((item) => {
+                    // 1. Buscamos el índice de la categoría para usar el mismo color del gráfico
+                    const catIndex = gastos_por_categoria.findIndex(c => c.name === item.categoria);
+
+                    // 2. Obtenemos el color (o un gris por defecto si por alguna razón falla)
+                    const catColor = catIndex !== -1 ? CHART_COLORS[catIndex % CHART_COLORS.length] : '#f3f4f6';
+
+                    return (
+                      <div
+                        key={item.categoria}
+                        // 3. Aplicamos el color de fondo con transparencia. 
+                        // Añadir "1A" al final de un código HEX equivale a un 10% de opacidad.
+                        // Añadir "33" sería un 20%.
+                        style={{ backgroundColor: `${catColor}1A` }}
+                        className="group flex items-center gap-3.5 p-4 rounded-2xl border border-transparent hover:brightness-95 transition-all duration-200"
+                      >
+                        <div
+                          className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm transition-colors"
+                          // Pintamos el icono con el color de la categoría
+                          style={{ color: catColor }}
+                        >
+                          <ArrowDownRight size={18} strokeWidth={2.5} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className="text-xs font-bold uppercase tracking-wider truncate mb-0.5"
+                            // Pintamos el nombre de la categoría para que combine
+                            style={{ color: catColor }}
+                          >
+                            {item.categoria}
+                          </p>
+                          <p className="text-sm font-extrabold text-ink truncate">
+                            {formatCurrency(item.monto)}
+                            <span className="text-xs font-medium text-ink-muted ml-1.5">({item.nota})</span>
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </section>
+          )}
+
+        </div>
 
         {/* ══════ RECENT ACTIVITY ════════════════════════════════ */}
         <section className="bg-white rounded-[2rem] p-6 shadow-card border border-brand-50/50">
@@ -563,12 +633,7 @@ export default function Dashboard() {
       </main>
 
       {/* FAB — Reset account */}
-      <button
-        onClick={handleResetData}
-        className="fixed bottom-6 right-6 w-14 h-14 bg-red-500 text-white rounded-2xl shadow-[0_8px_20px_rgba(239,68,68,0.4)] flex items-center justify-center hover:bg-red-600 hover:scale-105 transition-all active:scale-95 z-50"
-      >
-        <Trash2 size={24} strokeWidth={2.5} />
-      </button>
+
 
     </div>
   );
