@@ -39,31 +39,7 @@ class MensajeSimulado(BaseModel):
         return v.strip()
 
 
-# ── LLM structured output ──────────────────────────────────────
-class DatosFinancieros(BaseModel):
-    """Validated financial data extracted by the LLM.
-    Must contain exactly these four keys."""
 
-    tipo: Literal["INGRESO", "EGRESO", "CONSULTA"] = Field(
-        ...,
-        description="Type of intention — INGRESO, EGRESO, or CONSULTA.",
-    )
-    monto: float = Field(
-        ...,
-        ge=0,
-        description="Positive numeric amount. 0 for CONSULTA.",
-    )
-    categoria: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="Category (e.g. Comida, Sueldo, Fondo inicial, saldo).",
-    )
-    nota: str = Field(
-        ...,
-        max_length=500,
-        description="Short descriptive note about the movement.",
-    )
 
 
 # ── Saldo calculado ────────────────────────────────────────────

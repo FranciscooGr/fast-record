@@ -25,3 +25,7 @@ api_router.include_router(dashboard_router)
 from app.api.v1.endpoints.movimientos import router as movimientos_router
 api_router.include_router(movimientos_router)
 
+# ── Informes financieros ───────────────────────────────────
+from app.api.v1.endpoints.informes import router as informes_router
+api_router.include_router(informes_router)
+

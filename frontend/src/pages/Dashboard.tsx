@@ -3,16 +3,14 @@ import { useParams } from 'react-router-dom';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import {
   Wallet,
-  ShoppingBag,
   Trash2,
   ArrowUpRight,
   ArrowDownRight,
   ChevronLeft,
   ChevronRight,
   Trophy,
-  Menu,
-  LogOut
 } from 'lucide-react';
+import Navbar from '../components/Navbar';
 
 /* ═══════════════════════════════════════════════════════════════
    Types
@@ -149,8 +147,7 @@ export default function Dashboard() {
   const [periodo, setPeriodo] = useState<Periodo>('month');
   const [fechaReferencia, setFechaReferencia] = useState<Date>(new Date());
 
-  // ✅ ESTADO DEL MENÚ (Ubicado correctamente antes de los returns tempranos)
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
 
   // ── Fetch dashboard data ────────────────────────────────────
   const fetchDashboard = useCallback(async () => {
@@ -263,12 +260,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleLogout = () => {
-    if (window.confirm('¿Estás seguro de que deseas cerrar sesión?')) {
-      console.log("Cerrando sesión...");
-      setIsMenuOpen(false);
-    }
-  };
+
 
   // ── Formatting helpers ──────────────────────────────────────
   const formatCurrency = (val: number) =>
@@ -330,73 +322,22 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-surface pb-16 font-sans">
 
-      {/* HEADER */}
-      <header className="bg-white px-5 pt-8 pb-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] sticky top-0 z-20 rounded-b-3xl mb-6">
-        <div className="flex justify-between items-center mb-8 relative">
+      {/* NAVBAR */}
+      <Navbar
+        extraMenuItems={[
+          {
+            label: 'Resetear Cuenta',
+            icon: <Trash2 size={16} strokeWidth={2.5} />,
+            onClick: handleResetData,
+            className: 'text-red-500 hover:text-red-600 hover:bg-red-50',
+            iconClassName: 'bg-red-50 text-red-500',
+          },
+        ]}
+      />
 
-          {/* Lado Izquierdo: Logo y Título */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center text-white font-bold text-sm shadow-md">
-              <ShoppingBag size={20} strokeWidth={2.5} />
-            </div>
-            <div>
-              <h1 className="font-bold text-ink leading-tight text-lg">Fast Record</h1>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-ink-muted">Management</p>
-            </div>
-          </div>
-
-          {/* Lado Derecho: Menú Hamburguesa */}
-          <div>
-            <button
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="w-10 h-10 flex items-center justify-center rounded-xl bg-surface-muted text-ink-muted hover:text-ink hover:bg-brand-50 transition-colors active:scale-95"
-            >
-              <Menu size={22} strokeWidth={2.5} />
-            </button>
-
-            {/* Dropdown del Menú */}
-            {isMenuOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setIsMenuOpen(false)}
-                />
-                <div className="absolute right-0 top-12 mt-2 w-56 bg-white rounded-2xl shadow-card border border-brand-50/50 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                  <button
-                    onClick={() => {
-                      handleLogout();
-                      setIsMenuOpen(false);
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-3 text-sm font-semibold text-ink-muted hover:text-ink hover:bg-surface-muted rounded-xl transition-colors"
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center">
-                      <LogOut size={16} strokeWidth={2.5} />
-                    </div>
-                    Cerrar Sesión
-                  </button>
-
-                  <div className="h-px bg-surface-muted/60 my-1 mx-2" />
-
-                  <button
-                    onClick={() => {
-                      handleResetData();
-                      setIsMenuOpen(false);
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-3 text-sm font-semibold text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center">
-                      <Trash2 size={16} strokeWidth={2.5} />
-                    </div>
-                    Resetear Cuenta
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Balance Section */}
-        <div className="bg-surface-muted/50 rounded-2xl p-5 border border-surface-muted">
+      {/* BALANCE SECTION */}
+      <div className="px-5 pt-6 pb-2">
+        <div className="bg-white rounded-2xl p-5 shadow-card border border-brand-50/50">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-7 h-7 bg-brand-100 rounded-lg flex justify-center items-center text-brand-600">
               <Wallet size={14} />
@@ -407,7 +348,7 @@ export default function Dashboard() {
             <h2 className="text-4xl font-extrabold text-ink tracking-tight">{formatCurrency(saldo_historico_global)}</h2>
           </div>
         </div>
-      </header>
+      </div>
 
       <main className="px-5 space-y-6">
 
