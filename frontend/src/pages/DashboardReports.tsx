@@ -12,11 +12,9 @@ import {
   TrendingDown,
   PiggyBank,
   CalendarDays,
-  Download,
   BarChart3,
   Bug,
   ArrowUpRight,
-  ChevronRight,
   Activity,
 } from 'lucide-react';
 
