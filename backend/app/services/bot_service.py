@@ -20,7 +20,7 @@ from app.services.document_service import (
     extract_text_from_image_bytes,
     extract_text_from_pdf_bytes,
 )
-from app.services.hybrid_nlp_service import analyze_hybrid_message
+from app.services.nlp_service import analyze_hybrid_message
 from app.services.movimiento_service import (
     calcular_saldo,
     crear_movimiento,
@@ -278,12 +278,12 @@ async def process_incoming_message(
 
             # ── 6. Build clean dashboard URL with public_id ────────
             # produccion: 
-            frontend_url = f"{settings.FRONTEND_URL}/d/{user.public_id}"
+            #frontend_url = f"{settings.FRONTEND_URL}/d/{user.public_id}"
 
             # Le sacamos la barra final a la variable de entorno por si la tiene
             #Test:
-            #base_url = settings.FRONTEND_URL.rstrip("/")
-            #frontend_url = f"{base_url}/d/{user.public_id}"
+            base_url = settings.FRONTEND_URL.rstrip("/")
+            frontend_url = f"{base_url}/d/{user.public_id}"
                 
             # ── 7. Compose and send WhatsApp response ──────────────
             if tipo == "CONSULTA":

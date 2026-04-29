@@ -6,18 +6,18 @@
  * useReportsData hook.
  */
 
+import { useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   TrendingUp,
   TrendingDown,
   PiggyBank,
   CalendarDays,
-  Download,
   BarChart3,
   Bug,
   ArrowUpRight,
-  ChevronRight,
   Activity,
+  RotateCcw,
 } from 'lucide-react';
 
 import { useReportsData } from '../hooks/useReportsData';
@@ -100,7 +100,19 @@ const BAR_BG_COLORS = [
 export default function DashboardReports() {
   const { publicId } = useParams<{ publicId: string }>();
 
-  const { reports, isLoading, isError } = useReportsData(publicId);
+  /* ── Date range state ───────────────────────────────────── */
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+
+  const handleResetDates = useCallback(() => {
+    setStartDate(null);
+    setEndDate(null);
+  }, []);
+
+  const { reports, isLoading, isError } = useReportsData(publicId, {
+    startDate,
+    endDate,
+  });
 
   /* ── Loading ─────────────────────────────────────────────── */
   if (isLoading) return <ReportsSkeleton />;
@@ -126,7 +138,7 @@ export default function DashboardReports() {
     gasto_promedio_diario,
     top_categorias,
     gastos_hormiga,
-    periodo,
+    mayor_crecimiento,
   } = reports;
 
   /* ── Top categories analysis ─────────────────────────────── */
@@ -159,25 +171,41 @@ export default function DashboardReports() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Date range badge */}
-            <div className="inline-flex items-center gap-2 bg-surface-card border border-surface-muted rounded-xl px-4 py-2.5 shadow-sm">
-              <CalendarDays size={15} className="text-ink-faint" />
-              <span className="text-xs font-semibold text-ink-muted">
-                {periodo.start_date && periodo.end_date
-                  ? `${periodo.start_date} — ${periodo.end_date}`
-                  : 'Últimos 30 días'}
-              </span>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Date range controls */}
+            <div className="inline-flex items-center gap-2 bg-surface-card border border-surface-muted rounded-xl px-3 py-2 shadow-sm">
+              <CalendarDays size={15} className="text-ink-faint flex-shrink-0" />
+              <input
+                id="input-start-date"
+                type="date"
+                value={startDate ?? ''}
+                onChange={(e) => setStartDate(e.target.value || null)}
+                className="bg-transparent text-xs font-semibold text-ink-muted outline-none w-[110px] cursor-pointer"
+                aria-label="Fecha de inicio del informe"
+              />
+              <span className="text-xs text-ink-faint select-none">—</span>
+              <input
+                id="input-end-date"
+                type="date"
+                value={endDate ?? ''}
+                onChange={(e) => setEndDate(e.target.value || null)}
+                className="bg-transparent text-xs font-semibold text-ink-muted outline-none w-[110px] cursor-pointer"
+                aria-label="Fecha de fin del informe"
+              />
             </div>
 
-            {/* Export button */}
-            {/* <button
-              id="btn-export-report"
-              className="inline-flex items-center gap-2 bg-brand-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md shadow-brand-600/20 hover:bg-brand-700 active:scale-[0.97] transition-all"
-            >
-              <Download size={14} strokeWidth={2.5} />
-              Exportar
-            </button>*/}
+            {/* Reset to defaults */}
+            {(startDate || endDate) && (
+              <button
+                id="btn-reset-dates"
+                onClick={handleResetDates}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-ink-muted hover:text-ink bg-surface-card border border-surface-muted rounded-xl px-3 py-2 shadow-sm transition-colors active:scale-[0.97]"
+                aria-label="Restablecer fechas a últimos 30 días"
+              >
+                <RotateCcw size={13} strokeWidth={2.5} />
+                Últimos 30 días
+              </button>
+            )}
           </div>
         </header>
 
@@ -331,21 +359,43 @@ export default function DashboardReports() {
           {/* ── Right: Stacked cards (narrow — 1/3) ────────── */}
           <div className="space-y-4">
 
-            {/* — Mayor Crecimiento (design-only placeholder) — */}
+            {/* — Mayor Crecimiento — */}
             <div className="bg-surface-card rounded-2xl p-5 shadow-card border border-brand-50/50 relative overflow-hidden">
               <span className="text-[10px] font-bold uppercase tracking-widest text-brand-600 mb-3 block">
                 Mayor Crecimiento
               </span>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600">
-                  <ArrowUpRight size={18} strokeWidth={2.5} />
+
+              {mayor_crecimiento ? (
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600">
+                    <ArrowUpRight size={18} strokeWidth={2.5} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-ink truncate">
+                      {mayor_crecimiento.categoria}
+                    </p>
+                    <p className="text-xs text-ink-faint mt-0.5">
+                      {mayor_crecimiento.tendencia}
+                    </p>
+                  </div>
+                  <span className="text-sm font-extrabold text-brand-600 tabular-nums">
+                    +{mayor_crecimiento.porcentaje.toFixed(1)}%
+                  </span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-ink truncate">Ingresos Freelance</p>
-                  <p className="text-xs text-ink-faint mt-0.5">Tendencia al alza este mes</p>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-surface-muted flex items-center justify-center text-ink-faint">
+                    <BarChart3 size={18} strokeWidth={2.5} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-ink-muted">Sin datos comparativos</p>
+                    <p className="text-xs text-ink-faint mt-0.5">
+                      Se necesita un período anterior para comparar
+                    </p>
+                  </div>
                 </div>
-                <span className="text-sm font-extrabold text-brand-600">+24%</span>
-              </div>
+              )}
+
               {/* Decorative accent */}
               <div className="absolute -bottom-3 -right-3 w-16 h-16 rounded-full bg-brand-500 opacity-[0.05]" />
             </div>
@@ -370,13 +420,31 @@ export default function DashboardReports() {
                 </div>
               </div>
 
-              {/* <button
-                id="btn-gastos-hormiga-detail"
-                className="w-full flex items-center justify-center gap-1.5 text-xs font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-xl py-2.5 transition-colors active:scale-[0.98]"
-              >
-                Ver detalle
-                <ChevronRight size={14} strokeWidth={2.5} />
-              </button>*/}
+              {/* ── Impact percentage bar ─────────────────── */}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-semibold text-ink-muted">
+                    Impacto sobre ingresos
+                  </span>
+                  <span className="text-xs font-extrabold text-orange-600 tabular-nums">
+                    {gastos_hormiga.porcentaje_impacto.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="h-3 rounded-full overflow-hidden bg-orange-100">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-600 transition-all duration-700 ease-out"
+                    style={{ width: `${Math.min(gastos_hormiga.porcentaje_impacto, 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-ink-faint mt-1.5">
+                  {gastos_hormiga.porcentaje_impacto < 5
+                    ? 'Impacto bajo — ¡buen control!'
+                    : gastos_hormiga.porcentaje_impacto < 15
+                      ? 'Impacto moderado — revisá tus pequeños gastos'
+                      : 'Impacto alto — los gastos hormiga están afectando tu balance'
+                  }
+                </p>
+              </div>
 
               <div className="absolute -bottom-3 -right-3 w-16 h-16 rounded-full bg-orange-400 opacity-[0.05]" />
             </div>

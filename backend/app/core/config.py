@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     WABA_ID: str = ""
 
     # ── Frontend ────────────────────────────────────────────────
-    FRONTEND_URL: str = "https://fast-record.vercel.app"
-    #FRONTEND_URL: str = "http://localhost:5173/"
+    #FRONTEND_URL: str = "https://fast-record.vercel.app"
+    FRONTEND_URL: str = "http://localhost:5173/"
 
     model_config = {
         "env_file": ".env",

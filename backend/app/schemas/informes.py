@@ -6,6 +6,8 @@ The "saldo" is ALWAYS an aggregate of movements, honouring the inviolable
 business rule.
 """
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -68,6 +70,29 @@ class GastosHormiga(BaseModel):
     cantidad: int = Field(
         ..., description="Number of ant-expense movements."
     )
+    porcentaje_impacto: float = Field(
+        ...,
+        description=(
+            "Impact as percentage of total income: "
+            "(gastos_hormiga_total / ingresos_total) × 100."
+        ),
+    )
+
+
+# ── Mayor Crecimiento ─────────────────────────────────────────
+
+class MayorCrecimiento(BaseModel):
+    """Category with the highest period-over-period growth."""
+
+    categoria: str = Field(
+        ..., description="Name of the category that grew the most."
+    )
+    porcentaje: float = Field(
+        ..., description="Percentage variation: ((A-B)/B)×100."
+    )
+    tendencia: str = Field(
+        ..., description="Human-readable trend description."
+    )
 
 
 # ── Periodo ────────────────────────────────────────────────────
@@ -90,4 +115,8 @@ class InformesResponse(BaseModel):
     gasto_promedio_diario: GastoPromedioDiario
     top_categorias: TopCategorias
     gastos_hormiga: GastosHormiga
+    mayor_crecimiento: Optional[MayorCrecimiento] = Field(
+        None,
+        description="Category with greatest growth vs previous period. Null if insufficient data.",
+    )
     periodo: PeriodoInfo

@@ -174,11 +174,17 @@ async def calcular_gastos_hormiga(
     start_dt: datetime,
     end_dt: datetime,
     db: AsyncSession,
+    *,
+    ingresos_total: float = 0.0,
 ) -> dict:
     """
     Ant expenses: EGRESO movements with monto < GASTO_HORMIGA_LIMITE.
 
-    Returns the aggregate sum AND count of those micro-expenses.
+    Returns the aggregate sum, count, and the percentage impact relative
+    to the user's total income (``ingresos_total``).
+
+    ``porcentaje_impacto`` = (gastos_hormiga_total / ingresos_total) × 100.
+    When ``ingresos_total`` is 0 the percentage is 0 (avoids ZeroDivisionError).
     """
     base = _build_period_filter(user_id, start_dt, end_dt)
 
@@ -194,10 +200,113 @@ async def calcular_gastos_hormiga(
     result = await db.execute(stmt)
     row = result.one()
 
+    total = float(row.total)
+    porcentaje = round((total / ingresos_total) * 100, 2) if ingresos_total > 0 else 0.0
+
     return {
-        "total": float(row.total),
+        "total": total,
         "cantidad": int(row.cantidad),
+        "porcentaje_impacto": porcentaje,
     }
+
+
+async def _category_totals(
+    user_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+    db: AsyncSession,
+) -> dict[str, float]:
+    """
+    Return ``{category_name: total_amount}`` for ALL movement types
+    within the given period (both INGRESO and EGRESO combined).
+
+    Used internally to compare two periods and find the category
+    with the greatest positive growth.
+    """
+    base = _build_period_filter(user_id, start_dt, end_dt)
+
+    stmt = (
+        select(
+            Movement.categoria,
+            func.sum(Movement.monto).label("total"),
+        )
+        .where(*base)
+        .group_by(Movement.categoria)
+    )
+
+    result = await db.execute(stmt)
+    return {row.categoria: float(row.total) for row in result.all()}
+
+
+async def calcular_mayor_crecimiento(
+    user_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+    db: AsyncSession,
+) -> dict | None:
+    """
+    Period-vs-period growth analysis.
+
+    Compares the current period (A) against an equivalent-length
+    previous period (B) and returns the category with the highest
+    positive percentage variation::
+
+        variation = ((monto_A - monto_B) / monto_B) × 100
+
+    Edge cases
+    ----------
+    * ``monto_B == 0`` (new category): treated as +100 % growth.
+    * No positive growth in any category: returns ``None``.
+    * No data at all in either period: returns ``None``.
+    """
+    # ── Compute the equivalent previous period ──────────────────
+    period_days = max((end_dt.date() - start_dt.date()).days, 1)
+    prev_end_dt = start_dt - timedelta(seconds=1)
+    prev_start_dt = datetime(
+        (start_dt.date() - timedelta(days=period_days)).year,
+        (start_dt.date() - timedelta(days=period_days)).month,
+        (start_dt.date() - timedelta(days=period_days)).day,
+        tzinfo=timezone.utc,
+    )
+
+    # ── Fetch category totals for both periods ──────────────────
+    totals_a = await _category_totals(user_id, start_dt, end_dt, db)
+    totals_b = await _category_totals(user_id, prev_start_dt, prev_end_dt, db)
+
+    if not totals_a:
+        return None
+
+    # ── Calculate variation per category ────────────────────────
+    best: dict | None = None
+
+    for cat, monto_a in totals_a.items():
+        monto_b = totals_b.get(cat, 0.0)
+
+        if monto_b > 0:
+            variacion = ((monto_a - monto_b) / monto_b) * 100
+        elif monto_a > 0:
+            # New category with no previous data → 100 % growth
+            variacion = 100.0
+        else:
+            continue
+
+        if variacion <= 0:
+            continue
+
+        if best is None or variacion > best["porcentaje"]:
+            best = {
+                "categoria": cat,
+                "porcentaje": round(variacion, 1),
+                "tendencia": "Tendencia al alza este período",
+            }
+
+    if best is not None:
+        logger.info(
+            "mayor_crecimiento user=%d: %s +%.1f%%",
+            user_id, best["categoria"], best["porcentaje"],
+        )
+
+    return best
 
 
 # ── Orchestrator ───────────────────────────────────────────────
@@ -261,6 +370,11 @@ async def generar_informe_financiero(
 
     hormiga = await calcular_gastos_hormiga(
         user_id, start_dt, end_dt, db,
+        ingresos_total=balance["ingresos_total"],
+    )
+
+    crecimiento = await calcular_mayor_crecimiento(
+        user_id, start_dt, end_dt, db,
     )
 
     logger.info(
@@ -275,6 +389,7 @@ async def generar_informe_financiero(
         "gasto_promedio_diario": gasto_diario,
         "top_categorias": top_cats,
         "gastos_hormiga": hormiga,
+        "mayor_crecimiento": crecimiento,
         "periodo": {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
