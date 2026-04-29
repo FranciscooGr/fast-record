@@ -39,11 +39,18 @@ export interface TopCategorias {
 export interface GastosHormiga {
   total: number;
   cantidad: number;
+  porcentaje_impacto: number;
 }
 
 export interface PeriodoInfo {
   start_date: string;
   end_date: string;
+}
+
+export interface MayorCrecimiento {
+  categoria: string;
+  porcentaje: number;
+  tendencia: string;
 }
 
 export interface ReportsData {
@@ -53,6 +60,7 @@ export interface ReportsData {
   gasto_promedio_diario: GastoPromedioDiario;
   top_categorias: TopCategorias;
   gastos_hormiga: GastosHormiga;
+  mayor_crecimiento: MayorCrecimiento | null;
   periodo: PeriodoInfo;
 }
 
