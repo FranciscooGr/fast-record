@@ -47,15 +47,23 @@ class GastoPromedioDiario(BaseModel):
 
 
 class CategoriaGasto(BaseModel):
-    """A single category and its total expense."""
+    """A single category, its total expense, and real percentage."""
 
     categoria: str
     total: float
+    porcentaje: float = Field(
+        ...,
+        description="Percentage of this category vs total general expenses in the period.",
+    )
 
 
 class TopCategorias(BaseModel):
     """Top 3 expense categories ordered by total descending."""
 
+    total_general: float = Field(
+        ...,
+        description="Sum of ALL egresos in the period (not just the top N).",
+    )
     categorias: list[CategoriaGasto] = Field(
         ..., description="Up to 3 categories with the highest expense."
     )

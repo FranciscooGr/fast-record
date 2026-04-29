@@ -145,28 +145,51 @@ async def calcular_top_categorias(
     """
     Top N expense categories by total amount (descending).
 
-    Uses GROUP BY + ORDER BY + LIMIT.
+    1. Queries the **total general** of ALL egresos in the period.
+    2. Queries the top N categories by amount.
+    3. Computes each category's ``porcentaje`` against the total general
+       (not against the top-N subtotal).
+
+    Returns ``total_general`` alongside the list so the frontend can
+    display accurate percentages.
     """
     base = _build_period_filter(user_id, start_dt, end_dt)
+    egreso_filter = [*base, Movement.tipo == TipoMovimiento.EGRESO]
 
-    stmt = (
+    # ── 1. Total general de TODOS los egresos ───────────────────
+    total_stmt = select(
+        func.coalesce(func.sum(Movement.monto), 0).label("total_general"),
+    ).where(*egreso_filter)
+
+    total_general = float((await db.execute(total_stmt)).scalar_one())
+
+    # ── 2. Top N categorías ─────────────────────────────────────
+    top_stmt = (
         select(
             Movement.categoria,
             func.sum(Movement.monto).label("total"),
         )
-        .where(*base, Movement.tipo == TipoMovimiento.EGRESO)
+        .where(*egreso_filter)
         .group_by(Movement.categoria)
         .order_by(func.sum(Movement.monto).desc())
         .limit(top_n)
     )
 
-    result = await db.execute(stmt)
+    result = await db.execute(top_stmt)
+
+    # ── 3. Porcentaje real contra el total general ──────────────
     categorias = [
-        {"categoria": row.categoria, "total": float(row.total)}
+        {
+            "categoria": row.categoria,
+            "total": float(row.total),
+            "porcentaje": round(
+                (float(row.total) / total_general) * 100, 2
+            ) if total_general > 0 else 0.0,
+        }
         for row in result.all()
     ]
 
-    return {"categorias": categorias}
+    return {"total_general": total_general, "categorias": categorias}
 
 
 async def calcular_gastos_hormiga(
